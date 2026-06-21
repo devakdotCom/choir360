@@ -1,0 +1,6 @@
+{
+  "name": "Choir360",
+  "description": "Enterprise Roman Catholic Choir Management Platform with AI schedule optimization, smart song transliteration search, share calculation, and multilingual liturgical calendars.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

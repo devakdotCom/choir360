@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+src
+public
+*.md
+.git
+.gitignore
+firebase.json
+.firebaserc
+firestore.rules
+firestore.indexes.json

@@ -1,0 +1,311 @@
+rules_version = '2';
+
+// =============================================================================
+// CHOIR360 X – Firestore Security Rules
+// Enforced: tenant isolation, role-based access, immutable audit fields,
+// status escalation prevention, server-write-only audit logs.
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // HELPER FUNCTIONS
+    // -------------------------------------------------------------------------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myTenantId() {
+      return request.auth.token.tenantId;
+    }
+
+    function myParishId() {
+      return request.auth.token.parishId;
+    }
+
+    function myChoirId() {
+      return request.auth.token.choirId;
+    }
+
+    /** Incoming data belongs to the caller's tenant scope. */
+    function sameTenant() {
+      return signedIn()
+        && request.resource.data.tenantId == myTenantId()
+        && request.resource.data.parishId == myParishId()
+        && request.resource.data.choirId == myChoirId();
+    }
+
+    /** Existing document belongs to the caller's tenant. */
+    function existingInTenant() {
+      return signedIn()
+        && resource.data.tenantId == myTenantId();
+    }
+
+    /** Caller has an admin-level custom claim role. */
+    function adminRole() {
+      return signedIn()
+        && request.auth.token.role in ['super_admin', 'diocese_admin', 'parish_admin', 'choir_admin'];
+    }
+
+    /** Caller is a verified choir member or higher. */
+    function memberRole() {
+      return signedIn()
+        && request.auth.token.role in ['super_admin', 'diocese_admin', 'parish_admin', 'choir_admin', 'choir_member'];
+    }
+
+    /** Caller is the owner of the member document. */
+    function ownsMemberRecord(memberId) {
+      return signedIn() && request.auth.uid == memberId;
+    }
+
+    /** All required audit/tenant envelope fields must be present on write. */
+    function hasRequiredEnvelope() {
+      return request.resource.data.keys().hasAll([
+        'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
+        'status', 'tenantId', 'parishId', 'choirId'
+      ]);
+    }
+
+    /**
+     * Immutable fields must not change on an update.
+     * Prevents client from re-writing createdAt, createdBy, or tenant scope.
+     */
+    function immutableFieldsUnchanged() {
+      return request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.tenantId  == resource.data.tenantId
+        && request.resource.data.parishId  == resource.data.parishId
+        && request.resource.data.choirId   == resource.data.choirId;
+    }
+
+    /** Soft-deleted records are invisible. */
+    function notDeleted() {
+      return resource.data.status != 'deleted';
+    }
+
+    // =========================================================================
+    // MEMBERS
+    // =========================================================================
+    match /members/{memberId} {
+
+      // Any signed-in user in the same tenant can read non-deleted member records.
+      // Sensitive fields (dob, mobile, address) should be split to privateMembers
+      // in a future migration; for now Firestore rules protect the collection.
+      allow read: if signedIn()
+        && existingInTenant()
+        && notDeleted();
+
+      // Public registration: any signed-in user can create their own record.
+      // Status is always forced to 'Pending' by the application; Firestore
+      // rules here cannot enforce which status value is written but the server-
+      // side service layer always overrides it before calling Firestore.
+      allow create: if signedIn()
+        && sameTenant()
+        && hasRequiredEnvelope();
+
+      // Updates: admin can update any field; members can update their own record
+      // but cannot escalate their own status (only admin can change status).
+      allow update: if hasRequiredEnvelope()
+        && immutableFieldsUnchanged()
+        && sameTenant()
+        && (
+          adminRole()
+          || (
+            ownsMemberRecord(memberId)
+            // Members cannot change their own status field
+            && request.resource.data.status == resource.data.status
+          )
+        );
+
+      // Hard deletes are never allowed. Use status: 'deleted' instead.
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // MASS MANAGEMENT (admin-write, member-read)
+    // =========================================================================
+    match /masses/{docId} {
+      allow read: if memberRole() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // EVENTS (admin-write, member-read, member RSVP patch)
+    // =========================================================================
+    match /events/{docId} {
+      allow read: if signedIn() && existingInTenant() && notDeleted();
+
+      allow create: if adminRole() && sameTenant() && hasRequiredEnvelope();
+
+      // Members can patch only the `rsvps` field on existing events.
+      allow update: if sameTenant()
+        && hasRequiredEnvelope()
+        && immutableFieldsUnchanged()
+        && (
+          adminRole()
+          || (
+            memberRole()
+            // Only the rsvps map and audit update fields may change
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['rsvps', 'updatedAt', 'updatedBy'])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // PAYMENTS (admin only – financial data)
+    // =========================================================================
+    match /payments/{docId} {
+      allow read: if adminRole() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    match /paymentShares/{docId} {
+      allow read: if memberRole() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // ATTENDANCE
+    // =========================================================================
+    match /attendance/{docId} {
+      allow read: if memberRole() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // SONGS (public readable, admin write)
+    // =========================================================================
+    match /songs/{docId} {
+      allow read: if signedIn() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // ANNOUNCEMENTS (public readable, admin write)
+    // =========================================================================
+    match /announcements/{docId} {
+      allow read: if signedIn() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // NOTIFICATIONS (member readable, admin write)
+    // =========================================================================
+    match /notifications/{docId} {
+      allow read: if memberRole() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // CHOIRS / CALENDARS / APPROVAL WORKFLOWS / SETTINGS
+    // =========================================================================
+    match /choirs/{docId} {
+      allow read: if memberRole() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    match /calendars/{docId} {
+      allow read: if signedIn() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // DAILY MASS READINGS (public display, admin sync/write)
+    // =========================================================================
+    match /dailyReadings/{docId} {
+      allow read: if (
+          resource.data.publicDisplay == true
+          && resource.data.status != 'deleted'
+        )
+        || (
+          signedIn()
+          && existingInTenant()
+          && notDeleted()
+        );
+
+      allow create: if adminRole()
+        && sameTenant()
+        && hasRequiredEnvelope()
+        && request.resource.data.keys().hasAll([
+          'date', 'language', 'title', 'liturgicalDay',
+          'sourceUrl', 'lastSyncedAt', 'syncStatus', 'publicDisplay'
+        ]);
+
+      allow update: if adminRole()
+        && sameTenant()
+        && hasRequiredEnvelope()
+        && immutableFieldsUnchanged();
+
+      allow delete: if false;
+    }
+
+    match /approvalWorkflows/{docId} {
+      allow read: if adminRole() && existingInTenant() && notDeleted();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    match /appSettings/{docId} {
+      allow read: if adminRole() && existingInTenant();
+      allow create, update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // CLOUDINARY MEDIA
+    // =========================================================================
+    match /cloudinaryMedia/{mediaId} {
+      allow read: if signedIn()
+        && existingInTenant()
+        && notDeleted();
+
+      allow create: if signedIn()
+        && sameTenant()
+        && hasRequiredEnvelope()
+        && request.resource.data.keys().hasAll([
+          'publicId', 'secureUrl', 'thumbnailUrl', 'optimizedUrl',
+          'uploadedAt', 'uploadedByUserId', 'moduleName', 'relatedRecordId'
+        ]);
+
+      allow update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // AUDIT LOGS – server-write only, admin-read only
+    // No client can write audit logs. They are created exclusively by
+    // Firebase Admin SDK (server.ts / Cloud Functions).
+    // =========================================================================
+    match /auditLogs/{auditId} {
+      allow read: if adminRole()
+        && existingInTenant()
+        && notDeleted();
+
+      // Explicitly deny all client writes (including from admin users).
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // CATCH-ALL DENY
+    // Any collection not matched above is denied by default.
+    // This is belt-and-suspenders: Firestore denies by default anyway.
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
