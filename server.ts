@@ -148,8 +148,31 @@ app.use("/api", apiLimiter);
 
 const firebaseProjectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
 
-if (firebaseProjectId && admin.apps.length === 0) {
-  admin.initializeApp({ projectId: firebaseProjectId });
+if (admin.apps.length === 0) {
+  // On real GCP infra (Cloud Run/Functions) implicit service-identity credentials
+  // are available and projectId alone is enough. On non-GCP hosts (Render, Railway,
+  // a VM, etc.) there is no implicit credential, so verifyIdToken()/Firestore calls
+  // silently fail unless we explicitly build a credential from the service account
+  // JSON. Prefer the explicit credential whenever it's provided.
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+
+  if (serviceAccountJson && serviceAccountJson.trim()) {
+    try {
+      const serviceAccount = JSON.parse(serviceAccountJson);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        projectId: serviceAccount.project_id || firebaseProjectId,
+      });
+      console.log("[Choir360 X] Firebase Admin initialized with explicit service account credentials.");
+    } catch (error: any) {
+      console.error("[Choir360 X] FIREBASE_SERVICE_ACCOUNT_JSON is set but could not be parsed:", error?.message || error);
+    }
+  } else if (firebaseProjectId) {
+    // Falls back to Application Default Credentials (works on real GCP runtimes
+    // or local dev after `gcloud auth application-default login`).
+    admin.initializeApp({ projectId: firebaseProjectId });
+    console.log("[Choir360 X] Firebase Admin initialized with projectId only (relying on ADC) — set FIREBASE_SERVICE_ACCOUNT_JSON for non-GCP hosts.");
+  }
 }
 
 async function requireFirebaseAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -186,6 +209,50 @@ function requireString(value: unknown, field: string, maxLength = 500) {
   }
   return value.trim();
 }
+
+// ---------------------------------------------------------------------------
+// ONE-TIME ADMIN BOOTSTRAP
+// Solves the chicken-and-egg problem of granting the very first super_admin:
+// every other admin action requires requireAdminRole, which requires a role
+// that doesn't exist yet. Gated by a secret (not a user role) instead.
+//
+// Usage: set ADMIN_BOOTSTRAP_SECRET on the server once, call this endpoint
+// for the account that should become super_admin, then REMOVE the env var
+// (or rotate it) — leaving it set is a standing privilege-escalation risk.
+// ---------------------------------------------------------------------------
+app.post("/api/admin/bootstrap-super-admin", async (req, res) => {
+  try {
+    const configuredSecret = process.env.ADMIN_BOOTSTRAP_SECRET;
+    if (!configuredSecret || !configuredSecret.trim()) {
+      return res.status(503).json({ error: "ADMIN_BOOTSTRAP_SECRET is not configured on this server." });
+    }
+    if (!admin.apps.length) {
+      return res.status(503).json({ error: "Firebase Admin is not configured on this server." });
+    }
+
+    const email = requireString(req.body?.email, "email", 200);
+    const secret = requireString(req.body?.secret, "secret", 200);
+
+    if (secret !== configuredSecret) {
+      return res.status(403).json({ error: "Invalid bootstrap secret." });
+    }
+
+    const user = await admin.auth().getUserByEmail(email);
+    await admin.auth().setCustomUserClaims(user.uid, {
+      role: "super_admin",
+      tenantId: "global",
+      parishId: "st-thomas-cathedral",
+      choirId: "st-thomas-cathedral-choir",
+    });
+
+    return res.json({
+      message: `super_admin granted to ${email}. Remove ADMIN_BOOTSTRAP_SECRET from the server env now.`,
+      uid: user.uid,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error?.message || "Bootstrap failed." });
+  }
+});
 
 type BibleLanguage = "ta" | "en";
 

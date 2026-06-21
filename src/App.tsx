@@ -375,20 +375,23 @@ export default function App() {
           { id: 'song_library' as Tab,      Icon: Music2,          label: 'Songs' },
           { id: 'liturgical_planner' as Tab,Icon: Sparkles,        label: 'Plan' },
           { id: 'registration' as Tab,      Icon: UsersRound,      label: 'People' },
-        ]).map(({ id, Icon, label }) => {
-          const isActive = activeTab === id;
-          const accessible = guard.canAccess(TAB_REQUIRED_ROLE[id]);
-          return (
-            <button key={id} onClick={() => { if (accessible) navigate(id); }}
-              className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 min-h-[56px]"
-              aria-current={isActive ? 'page' : undefined}>
-              <Icon className={'h-5 w-5 ' + (isActive ? 'text-[#18392f]' : accessible ? 'text-slate-400' : 'text-slate-200')} />
-              <span className={'text-[9px] font-bold ' + (isActive ? 'text-[#18392f]' : accessible ? 'text-slate-400' : 'text-slate-200')}>
-                {label}
-              </span>
-            </button>
-          );
-        })}
+        ])
+          // Only show nav items the current user can actually open — no greyed-out
+          // placeholders for features gated behind a role the user doesn't have.
+          .filter(({ id }) => guard.canAccess(TAB_REQUIRED_ROLE[id]))
+          .map(({ id, Icon, label }) => {
+            const isActive = activeTab === id;
+            return (
+              <button key={id} onClick={() => navigate(id)}
+                className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 min-h-[56px]"
+                aria-current={isActive ? 'page' : undefined}>
+                <Icon className={'h-5 w-5 ' + (isActive ? 'text-[#18392f]' : 'text-slate-400')} />
+                <span className={'text-[9px] font-bold ' + (isActive ? 'text-[#18392f]' : 'text-slate-400')}>
+                  {label}
+                </span>
+              </button>
+            );
+          })}
       </nav>
       <div className="h-[calc(56px+env(safe-area-inset-bottom))] lg:hidden" aria-hidden="true" />
     </div>

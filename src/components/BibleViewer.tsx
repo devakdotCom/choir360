@@ -6,6 +6,7 @@ import { BiblePdfViewer } from './bible/BiblePdfViewer';
 import { DailyReadingsCard } from './bible/DailyReadingsCard';
 import { DailyReadingsSyncPanel } from './bible/DailyReadingsSyncPanel';
 import { ENGLISH_BIBLE_INDEX } from '../data/englishBibleIndex';
+import { TAMIL_BIBLE_INDEX } from '../data/tamilBibleIndex';
 
 const bibleDocuments: Record<'ta' | 'en', BibleDocument> = {
   ta: {
@@ -16,6 +17,7 @@ const bibleDocuments: Record<'ta' | 'en', BibleDocument> = {
     subtitle: 'Loading Tamil Bible PDF...',
     pdfUrl: '/docs/tamil-bible-pothu-mozhipeyarppu.pdf',
     isAvailable: true,
+    chapterIndex: TAMIL_BIBLE_INDEX,
   },
   en: {
     id: 'en',

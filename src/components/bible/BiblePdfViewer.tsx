@@ -25,6 +25,9 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
+  // Monotonically increasing token — guards against a stale, already-superseded
+  // render's async callbacks touching state or the canvas after a newer render started.
+  const renderGenerationRef = useRef(0);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageInput, setPageInput] = useState('1');
@@ -42,6 +45,15 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
   const hasChapterIndex = Boolean(document.chapterIndex?.length);
 
   useEffect(() => {
+    // Bump the generation token immediately so any render still in flight for
+    // the *previous* document (e.g. switching Tamil <-> English tabs) is
+    // recognized as stale and never touches this document's canvas/state.
+    renderGenerationRef.current += 1;
+    if (renderTaskRef.current) {
+      renderTaskRef.current.cancel();
+      renderTaskRef.current = null;
+    }
+
     setPdf(null);
     setPageNumber(1);
     setPageInput('1');
@@ -97,18 +109,32 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
     const context = canvas.getContext('2d');
     if (!context) return;
 
+    // Claim this render generation. Any in-flight async work from a previous
+    // generation checks this token before touching state/canvas and bails out
+    // if it's been superseded — this is what actually prevents the
+    // "same canvas during multiple render operations" crash, not just cancel().
+    const myGeneration = ++renderGenerationRef.current;
+    const isStale = () => renderGenerationRef.current !== myGeneration || !isMounted;
+
     const renderPage = async () => {
       setIsPageLoading(true);
       setError('');
 
       if (renderTaskRef.current) {
-        renderTaskRef.current.cancel();
+        // cancel() only *requests* cancellation — pdf.js may still be mid-paint
+        // on this canvas. Await the (rejected) promise so the canvas is fully
+        // free before the next render() call claims it.
+        const previousTask = renderTaskRef.current;
         renderTaskRef.current = null;
+        previousTask.cancel();
+        await previousTask.promise.catch(() => {});
       }
+
+      if (isStale()) return;
 
       try {
         const page = await pdf.getPage(pageNumber);
-        if (!isMounted) return;
+        if (isStale()) return;
 
         const baseViewport = page.getViewport({ scale: 1 });
         const containerWidth = Math.max((viewerRef.current?.clientWidth ?? 900) - 48, 320);
@@ -125,30 +151,32 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
         context.clearRect(0, 0, viewport.width, viewport.height);
 
         const annotations = await page.getAnnotations({ intent: 'display' });
-        if (isMounted) {
-          setLinkOverlays(
-            annotations
-              .filter((annotation) => annotation.subtype === 'Link' && annotation.rect)
-              .map((annotation, index) => {
-                const rect = viewport.convertToViewportRectangle(annotation.rect);
-                const left = Math.min(rect[0], rect[2]);
-                const top = Math.min(rect[1], rect[3]);
-                const width = Math.abs(rect[0] - rect[2]);
-                const height = Math.abs(rect[1] - rect[3]);
+        if (isStale()) return;
 
-                return {
-                  id: `${pageNumber}-${index}`,
-                  left,
-                  top,
-                  width,
-                  height,
-                  url: annotation.url || annotation.unsafeUrl,
-                  dest: annotation.dest,
-                };
-              })
-              .filter((overlay) => overlay.width > 0 && overlay.height > 0)
-          );
-        }
+        setLinkOverlays(
+          annotations
+            .filter((annotation) => annotation.subtype === 'Link' && annotation.rect)
+            .map((annotation, index) => {
+              const rect = viewport.convertToViewportRectangle(annotation.rect);
+              const left = Math.min(rect[0], rect[2]);
+              const top = Math.min(rect[1], rect[3]);
+              const width = Math.abs(rect[0] - rect[2]);
+              const height = Math.abs(rect[1] - rect[3]);
+
+              return {
+                id: `${pageNumber}-${index}`,
+                left,
+                top,
+                width,
+                height,
+                url: annotation.url || annotation.unsafeUrl,
+                dest: annotation.dest,
+              };
+            })
+            .filter((overlay) => overlay.width > 0 && overlay.height > 0)
+        );
+
+        if (isStale()) return;
 
         const task = page.render({ canvas, canvasContext: context, viewport });
         renderTaskRef.current = task;
@@ -162,10 +190,10 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
         ) {
           return;
         }
-        if (!isMounted) return;
+        if (isStale()) return;
         setError(renderError instanceof Error ? renderError.message : 'Bible page could not be rendered.');
       } finally {
-        if (isMounted) setIsPageLoading(false);
+        if (!isStale()) setIsPageLoading(false);
       }
     };
 
@@ -182,14 +210,26 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
   }, [pdf, pageNumber, zoom, resizeNonce]);
 
   useEffect(() => {
-    if (!pdf) return;
+    if (!pdf || !viewerRef.current) return;
 
+    let frame = 0;
     const handleResize = () => {
-      setResizeNonce((current) => current + 1);
+      // Coalesce rapid-fire resize/layout events into one re-render per frame.
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        setResizeNonce((current) => current + 1);
+      });
     };
 
+    const observer = new ResizeObserver(handleResize);
+    observer.observe(viewerRef.current);
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', handleResize);
+    };
   }, [pdf]);
 
   const goToPage = (nextPage: number) => {
@@ -476,6 +516,15 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
                 <ZoomIn className="h-4 w-4" />
                 Zoom in
               </button>
+              <button
+                type="button"
+                onClick={() => setZoom(1)}
+                disabled={!pdf || zoom === 1}
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-700 disabled:opacity-40"
+                title="Reset zoom to fit the available width"
+              >
+                Fit Width
+              </button>
             </div>
           </div>
 
@@ -487,14 +536,14 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
             </div>
           )}
 
-          <div className="grid min-h-[560px] lg:grid-cols-[300px_minmax(0,1fr)]">
+          <div className={`grid min-h-[560px] ${hasChapterIndex ? 'lg:grid-cols-[300px_minmax(0,1fr)]' : 'lg:grid-cols-1'}`}>
             {hasChapterIndex && (
               <aside className="hidden border-r border-slate-200 lg:block">
                 {ChapterNavigation}
               </aside>
             )}
 
-          <div ref={viewerRef} className="relative h-[calc(100dvh-21rem)] min-h-[560px] overflow-auto bg-slate-200 p-4">
+          <div ref={viewerRef} className="relative min-w-0 h-[100svh] max-h-[calc(100dvh-21rem)] min-h-[560px] overflow-auto bg-slate-200 p-4">
             {(isDocumentLoading || isPageLoading) && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-[1px]">
                 <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm">
@@ -513,9 +562,9 @@ export const BiblePdfViewer: React.FC<BiblePdfViewerProps> = ({ document }) => {
                 </div>
               </div>
             ) : (
-              <div className="flex min-w-max justify-center">
-                <div className="relative inline-block">
-                  <canvas ref={canvasRef} className="bg-white shadow-xl" aria-label={`${document.label} PDF page`} />
+              <div className="flex w-full justify-center">
+                <div className="relative inline-block max-w-full">
+                  <canvas ref={canvasRef} className="max-w-full bg-white shadow-xl" aria-label={`${document.label} PDF page`} />
                   {linkOverlays.map((overlay) => (
                     <button
                       key={overlay.id}
