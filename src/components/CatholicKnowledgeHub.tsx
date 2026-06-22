@@ -3,6 +3,7 @@ import { BookOpen, Star, Calendar, Heart, Search, Newspaper, RefreshCw, External
 import { apiFetch } from '../services/apiClient';
 import { useFirebaseAuth, hasMinimumRole } from '../hooks/useFirebaseAuth';
 import { DailyReadingsCard } from './bible/DailyReadingsCard';
+import { DailyReadingsSyncPanel } from './bible/DailyReadingsSyncPanel';
 
 // ─── Static Saints Database (June focus) ────────────────────────────────────
 const SAINTS_DATABASE = [
@@ -282,11 +283,13 @@ export const CatholicKnowledgeHub: React.FC = () => {
           ))}
         </div>
 
-        {/* Gospel Tab — same live-synced reading card used in the Bible section,
-            so the date here always matches today and never goes stale. */}
+        {/* Gospel Tab — live-synced reading card (was previously duplicated in
+            the Bible section too; now lives here only, so the date always
+            matches today everywhere instead of drifting out of sync). */}
         {tab === 'gospel' && (
-          <div className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
             <DailyReadingsCard />
+            <DailyReadingsSyncPanel currentRole={effectiveRole} />
           </div>
         )}
 

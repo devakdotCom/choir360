@@ -1,7 +1,7 @@
 import React from 'react';
-import { BookOpen, CalendarDays, Languages } from 'lucide-react';
+import { BookOpen, Languages } from 'lucide-react';
 
-export type BibleSection = 'ta' | 'en' | 'readings';
+export type BibleSection = 'ta' | 'en';
 
 interface BibleLanguageTabsProps {
   activeSection: BibleSection;
@@ -11,11 +11,10 @@ interface BibleLanguageTabsProps {
 const tabs: { id: BibleSection; label: string; description: string; Icon: React.ElementType }[] = [
   { id: 'ta', label: 'Tamil Bible', description: 'திருவிவிலியம்', Icon: BookOpen },
   { id: 'en', label: 'English Bible', description: 'Roman Catholic PDF', Icon: Languages },
-  { id: 'readings', label: 'இன்றைய திருப்பலி வாசகங்கள்', description: "Today's Mass Readings", Icon: CalendarDays },
 ];
 
 export const BibleLanguageTabs: React.FC<BibleLanguageTabsProps> = ({ activeSection, onSectionChange }) => (
-  <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm md:grid-cols-3">
+  <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm md:grid-cols-2">
     {tabs.map(({ id, label, description, Icon }) => {
       const active = activeSection === id;
       return (

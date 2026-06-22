@@ -1,10 +1,7 @@
 import React, { useState } from 'react';
 import { BibleDocument } from '../types';
-import { useFirebaseAuth } from '../hooks/useFirebaseAuth';
 import { BibleLanguageTabs, BibleSection } from './bible/BibleLanguageTabs';
 import { BiblePdfViewer } from './bible/BiblePdfViewer';
-import { DailyReadingsCard } from './bible/DailyReadingsCard';
-import { DailyReadingsSyncPanel } from './bible/DailyReadingsSyncPanel';
 import { ENGLISH_BIBLE_INDEX } from '../data/englishBibleIndex';
 import { TAMIL_BIBLE_INDEX } from '../data/tamilBibleIndex';
 
@@ -31,22 +28,17 @@ const bibleDocuments: Record<'ta' | 'en', BibleDocument> = {
   },
 };
 
+// Today's Mass Readings used to have its own tab here, duplicating the same
+// live-synced card now shown in Catholic Hub's "Daily Gospel" tab. Removed to
+// avoid two disconnected copies of the same content drifting out of sync —
+// it now lives in exactly one place.
 export const BibleViewer: React.FC = () => {
   const [activeSection, setActiveSection] = useState<BibleSection>('ta');
-  const { effectiveRole } = useFirebaseAuth();
 
   return (
     <div className="space-y-5 text-slate-800">
       <BibleLanguageTabs activeSection={activeSection} onSectionChange={setActiveSection} />
-
-      {activeSection === 'readings' ? (
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-          <DailyReadingsCard />
-          <DailyReadingsSyncPanel currentRole={effectiveRole} />
-        </div>
-      ) : (
-        <BiblePdfViewer document={bibleDocuments[activeSection]} />
-      )}
+      <BiblePdfViewer document={bibleDocuments[activeSection]} />
     </div>
   );
 };
