@@ -1,7 +1,7 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3, Bell, CalendarDays, Church, Command,
-  Crown, HeartHandshake, LayoutDashboard, Menu, Music2, Search,
+  HeartHandshake, LayoutDashboard, Menu, Music2, Search,
   Sparkles, Star, UserPlus, UsersRound, X, BookOpen, BookText,
 } from 'lucide-react';
 import { Announcement, ChoirEvent, Language, Mass, Member, MemberStatus, Payment, Role } from './types';
@@ -30,8 +30,7 @@ type Tab =
   | 'analytics'
   | 'catholic_hub'
   | 'liturgical_planner'
-  | 'gamification'
-  | 'super_admin';
+  | 'gamification';
 
 const TAB_REQUIRED_ROLE: Record<Tab, Role> = {
   landing: 'public_user',
@@ -46,7 +45,6 @@ const TAB_REQUIRED_ROLE: Record<Tab, Role> = {
   ai_hub: 'choir_member',
   gamification: 'choir_member',
   analytics: 'choir_admin',
-  super_admin: 'super_admin',
 };
 
 // ─── Lazy Imports ─────────────────────────────────────────────────────────────
@@ -62,7 +60,6 @@ const AnalyticsDashboard = React.lazy(() => import('./components/AnalyticsDashbo
 const CatholicKnowledgeHub = React.lazy(() => import('./components/CatholicKnowledgeHub').then((m) => ({ default: m.CatholicKnowledgeHub })));
 const LiturgicalPlanner = React.lazy(() => import('./components/LiturgicalPlanner').then((m) => ({ default: m.LiturgicalPlanner })));
 const GamificationProfileView = React.lazy(() => import('./components/GamificationProfile').then((m) => ({ default: m.GamificationProfileView })));
-const SuperAdminCenter = React.lazy(() => import('./components/SuperAdminCenter').then((m) => ({ default: m.SuperAdminCenter })));
 
 // ─── Nav Config ──────────────────────────────────────────────────────────────
 const navItems: { id: Tab; label: string; icon: React.ElementType; minRole: Role }[] = [
@@ -77,7 +74,6 @@ const navItems: { id: Tab; label: string; icon: React.ElementType; minRole: Role
   { id: 'liturgical_planner',  label: 'AI Mass Planner',  icon: Sparkles,        minRole: 'choir_member' },
   { id: 'gamification',        label: 'My Achievements',  icon: Star,            minRole: 'choir_member' },
   { id: 'analytics',           label: 'Insights',         icon: BarChart3,       minRole: 'choir_admin' },
-  { id: 'super_admin',         label: 'Command Center',   icon: Crown,           minRole: 'super_admin' },
 ];
 
 const languages: { id: Language; label: string }[] = [
@@ -472,11 +468,6 @@ export default function App() {
                   <GamificationProfileView member={currentMember} allMembers={members} />
                 ) : <ModuleSkeleton />
               ) : <AccessDenied requiredRole="choir_member" />
-            )}
-            {activeTab === 'super_admin' && (
-              guard.canAccess('super_admin') ? (
-                <SuperAdminCenter members={members} masses={masses} payments={payments} />
-              ) : <AccessDenied requiredRole="super_admin" />
             )}
           </Suspense>
         </main>

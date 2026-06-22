@@ -25,6 +25,7 @@ import {
   IdCard,
 } from 'lucide-react';
 import { MULTILINGUAL_DICTIONARY } from '../data/mockData';
+import { formatRegionalCurrency } from '../utils/currency';
 import { DigitalChoirID } from './DigitalChoirID';
 
 interface DashboardMemberProps {
@@ -486,8 +487,8 @@ export const DashboardMember: React.FC<DashboardMemberProps> = ({
                     <tr key={earn.id}>
                       <td className="py-3.5 font-bold text-slate-800">{earn.name}</td>
                       <td className="py-3.5 text-slate-500 font-mono">{earn.date}</td>
-                      <td className="py-3.5 text-right text-slate-600 font-mono">₹{earn.amount.toLocaleString()}</td>
-                      <td className="py-3.5 text-right text-emerald-700 font-bold font-mono">₹{earn.share.toLocaleString()}</td>
+                      <td className="py-3.5 text-right text-slate-600 font-mono">{formatRegionalCurrency(earn.amount)}</td>
+                      <td className="py-3.5 text-right text-emerald-700 font-bold font-mono">{formatRegionalCurrency(earn.share)}</td>
                       <td className="py-3.5 text-right">
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
                           earn.status === 'Disbursed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'

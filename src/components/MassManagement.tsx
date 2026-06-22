@@ -18,6 +18,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { MULTILINGUAL_DICTIONARY } from '../data/mockData';
+import { formatRegionalCurrency } from '../utils/currency';
 
 interface MassManagementProps {
   currentLang: Language;
@@ -117,7 +118,7 @@ export const MassManagement: React.FC<MassManagementProps> = ({
     });
 
     onUpdatePayment(activePayment.id, activePayment.promisedAmount, 'Received');
-    alert(`Calculation Engine status: LOCKED! Accounts for ${activePayment.partyName} are completed. Total distributed share is ₹${activePayment.promisedAmount}`);
+    alert(`Calculation Engine status: LOCKED! Accounts for ${activePayment.partyName} are completed. Total distributed share is ${formatRegionalCurrency(activePayment.promisedAmount)}`);
   };
 
   const handleUnlockCalculation = () => {
@@ -267,9 +268,9 @@ export const MassManagement: React.FC<MassManagementProps> = ({
                         <p className="font-semibold text-slate-700">{p.massType}</p>
                         <p className="text-[10px] text-slate-400 font-mono">{p.massDate} at {p.massTime}</p>
                       </td>
-                      <td className="py-3.5 text-right font-bold font-mono">₹{p.promisedAmount}</td>
+                      <td className="py-3.5 text-right font-bold font-mono">{formatRegionalCurrency(p.promisedAmount)}</td>
                       <td className={`py-3.5 text-right font-bold font-mono ${hasPending ? 'text-rose-600' : 'text-slate-400'}`}>
-                        ₹{isLocked ? 0 : p.pendingAmount}
+                        {formatRegionalCurrency(isLocked ? 0 : p.pendingAmount)}
                       </td>
                       <td className="py-3.5 text-center">
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${
@@ -403,7 +404,7 @@ export const MassManagement: React.FC<MassManagementProps> = ({
               <div className="space-y-4 font-sans text-xs">
                 <div className="flex justify-between border-b border-slate-700/50 pb-2">
                   <span className="text-slate-400">Gross Promised Amount</span>
-                  <span className="font-bold text-white font-mono text-sm">₹{activePayment.promisedAmount.toLocaleString()}</span>
+                  <span className="font-bold text-white font-mono text-sm">{formatRegionalCurrency(activePayment.promisedAmount)}</span>
                 </div>
                 
                 <div className="flex justify-between border-b border-slate-700/50 pb-2">
@@ -419,13 +420,13 @@ export const MassManagement: React.FC<MassManagementProps> = ({
                 <div className="flex justify-between border-b border-slate-700/50 pb-2">
                   <span className="text-slate-400">Unit Weight Cash Value</span>
                   <span className="font-extrabold text-emerald-400 font-mono text-sm">
-                    ₹{isCurrentLocked ? lockedCalculations[activePayment.id]?.unitValue : currentCalc.unitValue}
+                    {formatRegionalCurrency(isCurrentLocked ? lockedCalculations[activePayment.id]?.unitValue : currentCalc.unitValue)}
                   </span>
                 </div>
               </div>
 
               <div className="bg-emerald-950/40 p-3 rounded-lg border border-emerald-900/60 text-[10px] text-emerald-300/80 leading-normal font-mono mt-4">
-                Formula: ₹{activePayment.promisedAmount} / (({isCurrentLocked ? lockedCalculations[activePayment.id]?.singers : singerPresentCount} Singers × 1) + ({isCurrentLocked ? lockedCalculations[activePayment.id]?.instruments : instrumentPresentCount} Instrumentalists × 2))
+                Formula: {formatRegionalCurrency(activePayment.promisedAmount)} / (({isCurrentLocked ? lockedCalculations[activePayment.id]?.singers : singerPresentCount} Singers × 1) + ({isCurrentLocked ? lockedCalculations[activePayment.id]?.instruments : instrumentPresentCount} Instrumentalists × 2))
               </div>
             </div>
 
@@ -438,7 +439,7 @@ export const MassManagement: React.FC<MassManagementProps> = ({
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center space-y-1">
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Per Singer</p>
                   <p className="text-lg font-extrabold text-white font-mono">
-                    ₹{isCurrentLocked ? lockedCalculations[activePayment.id]?.singerShare : currentCalc.singerShare}
+                    {formatRegionalCurrency(isCurrentLocked ? lockedCalculations[activePayment.id]?.singerShare : currentCalc.singerShare)}
                   </p>
                   <p className="text-[9px] text-emerald-500">Weight Factor: 1x</p>
                 </div>
@@ -447,7 +448,7 @@ export const MassManagement: React.FC<MassManagementProps> = ({
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center space-y-1">
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Per Musician</p>
                   <p className="text-lg font-extrabold text-yellow-400 font-mono">
-                    ₹{isCurrentLocked ? lockedCalculations[activePayment.id]?.instrumentShare : currentCalc.instrumentalistShare}
+                    {formatRegionalCurrency(isCurrentLocked ? lockedCalculations[activePayment.id]?.instrumentShare : currentCalc.instrumentalistShare)}
                   </p>
                   <p className="text-[9px] text-yellow-500">Weight Factor: 2x</p>
                 </div>
@@ -456,7 +457,7 @@ export const MassManagement: React.FC<MassManagementProps> = ({
               {/* PDF Preview trigger */}
               <button
                 onClick={() => {
-                  alert(`Generating Diocesan Standard Financial Audit for ${activePayment.partyName}...\n\nSponsors Offering: ₹${activePayment.promisedAmount}\nDisbursed to: ${singerPresentCount} Singers, ${instrumentPresentCount} Instrumentalists.\n\nApproved securely via Choir360 financial ledger module!`);
+                  alert(`Generating Diocesan Standard Financial Audit for ${activePayment.partyName}...\n\nSponsors Offering: ${formatRegionalCurrency(activePayment.promisedAmount)}\nDisbursed to: ${singerPresentCount} Singers, ${instrumentPresentCount} Instrumentalists.\n\nApproved securely via Choir360 financial ledger module!`);
                 }}
                 className="w-full py-3 min-h-[44px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border border-slate-700 transition"
               >

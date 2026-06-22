@@ -16,6 +16,7 @@ import {
   UserCheck,
   UsersRound,
 } from 'lucide-react';
+import { formatRegionalCurrency } from '../utils/currency';
 
 interface LandingPageProps {
   currentLang: Language;
@@ -26,9 +27,6 @@ interface LandingPageProps {
   events: ChoirEvent[];
   announcements: Announcement[];
 }
-
-const formatMoney = (value: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   onNavigate,
@@ -111,7 +109,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         {[
           { label: 'Active members', value: activeMembers.length, detail: `${pendingMembers.length} need review`, icon: UsersRound, color: 'bg-blue-50 text-blue-700' },
           { label: 'Attendance', value: `${averageAttendance}%`, detail: '+4% this month', icon: UserCheck, color: 'bg-emerald-50 text-emerald-700' },
-          { label: 'Pending collection', value: formatMoney(pendingCollections), detail: `${payments.filter((p) => p.status === 'Pending').length} open payments`, icon: CircleDollarSign, color: 'bg-amber-50 text-amber-700' },
+          { label: 'Pending collection', value: formatRegionalCurrency(pendingCollections), detail: `${payments.filter((p) => p.status === 'Pending').length} open payments`, icon: CircleDollarSign, color: 'bg-amber-50 text-amber-700' },
           { label: 'Choir health', value: 'Excellent', detail: 'Score 91 / 100', icon: TrendingUp, color: 'bg-violet-50 text-violet-700' },
         ].map((stat) => (
           <article key={stat.label} className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">

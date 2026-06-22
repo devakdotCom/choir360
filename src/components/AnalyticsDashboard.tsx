@@ -11,6 +11,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { MULTILINGUAL_DICTIONARY } from '../data/mockData';
+import { formatRegionalCurrency } from '../utils/currency';
 
 interface AnalyticsDashboardProps {
   currentLang: Language;
@@ -81,14 +82,14 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
         {/* Card 2 */}
         <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-1.5 flex flex-col justify-between shadow-xs">
           <p className="text-[10px] font-bold text-slate-400 uppercase">Total Offerings</p>
-          <p className="text-2xl font-extrabold text-slate-800 font-mono">₹{totalReceivedOfferings.toLocaleString()}</p>
+          <p className="text-2xl font-extrabold text-slate-800 font-mono">{formatRegionalCurrency(totalReceivedOfferings)}</p>
           <p className="text-[10px] text-emerald-600 font-semibold">Cleared via parish council</p>
         </div>
 
         {/* Card 3 */}
         <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-1.5 flex flex-col justify-between shadow-xs">
           <p className="text-[10px] font-bold text-slate-400 uppercase">Adues Outstanding</p>
-          <p className="text-2xl font-extrabold text-rose-600 font-mono">₹{totalOutstandingAdues.toLocaleString()}</p>
+          <p className="text-2xl font-extrabold text-rose-600 font-mono">{formatRegionalCurrency(totalOutstandingAdues)}</p>
           <p className="text-[10px] text-rose-500 font-semibold">Pending invoice followups</p>
         </div>
 
@@ -175,7 +176,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                 <p className="font-bold text-slate-800">Gross Offerings (Approved & Disbursed)</p>
                 <p className="text-[10px] text-slate-400 font-mono">Completed marriages and feasts ceremonies</p>
               </div>
-              <span className="text-sm font-extrabold text-emerald-800 font-mono">₹{totalReceivedOfferings.toLocaleString()}</span>
+              <span className="text-sm font-extrabold text-emerald-800 font-mono">{formatRegionalCurrency(totalReceivedOfferings)}</span>
             </div>
 
             {/* Accrued Outstanding */}
@@ -184,7 +185,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                 <p className="font-bold text-slate-800">Gross Pending offerings</p>
                 <p className="text-[10px] text-slate-400 font-mono">Awaiting wedding party clearing</p>
               </div>
-              <span className="text-sm font-extrabold text-rose-600 font-mono">₹{totalOutstandingAdues.toLocaleString()}</span>
+              <span className="text-sm font-extrabold text-rose-600 font-mono">{formatRegionalCurrency(totalOutstandingAdues)}</span>
             </div>
 
             {/* Projected Yearly Choral Splits */}
