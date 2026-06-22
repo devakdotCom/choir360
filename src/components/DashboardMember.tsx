@@ -29,7 +29,7 @@ import { DigitalChoirID } from './DigitalChoirID';
 
 interface DashboardMemberProps {
   currentLang: Language;
-  memberId: string; // The logged-in member context (e.g. "M001")
+  memberId: string; // The logged-in member context.
   members: Member[];
   events: ChoirEvent[];
   masses: Mass[];
@@ -104,12 +104,7 @@ export const DashboardMember: React.FC<DashboardMemberProps> = ({
     setTimeout(() => setAvailSavedMsg(''), 6000);
   };
 
-  // Mock earnings for this member
-  const mockEarnings = [
-    { id: 'E01', name: 'Thanksgiving Solemn feast mass', date: '2026-06-28', amount: 10000, share: 1000, status: 'Approved' },
-    { id: 'E02', name: 'Marriage Mass booking (Arokia/Mary)', date: '2026-06-02', amount: 8000, share: 900, status: 'Disbursed' },
-    { id: 'E03', name: 'First Holy Communion high ceremony', date: '2026-05-18', amount: 12000, share: 1200, status: 'Disbursed' }
-  ];
+  const earnings: Array<{ id: string; name: string; date: string; amount: number; share: number; status: string }> = [];
 
   // --- Rehearsal Isolation and Practice Deck states ---
   const [isPlayingPractice, setIsPlayingPractice] = useState(false);
@@ -124,11 +119,7 @@ export const DashboardMember: React.FC<DashboardMemberProps> = ({
   const [pitchMatches, setPitchMatches] = useState<string>('');
 
   // --- Social Forum Feed States ---
-  const [prayers, setPrayers] = useState([
-    { id: 1, author: "Amal Joseph (Choir Organist)", text: "Please pray for our upcoming Diocese Choral Festival competition in Madurai next Sunday. We want our 4-part harmony to be clean and unified!", category: "Choir Intention", prays: 14, userPrayed: false },
-    { id: 2, author: "Sister Mary Teresa", text: "Special thanksgiving intention for the marriage of Dr. Jo Joseph, our veteran soprano leader. Praying for their newly married couple life.", category: "Thanksgiving", prays: 28, userPrayed: true },
-    { id: 3, author: "Rev. Father Susairaj", text: "Pray for the musical health and vocal persistence of all Choir elements in South Tamil Nadu, Thoothukudi parish.", category: "General Intent", prays: 41, userPrayed: false },
-  ]);
+  const [prayers, setPrayers] = useState<Array<{ id: number; author: string; text: string; category: string; prays: number; userPrayed: boolean }>>([]);
   const [newPrayerText, setNewPrayerText] = useState("");
   const [successPost, setSuccessPost] = useState("");
 
@@ -491,7 +482,7 @@ export const DashboardMember: React.FC<DashboardMemberProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 text-xs">
-                  {mockEarnings.map((earn) => (
+                  {earnings.map((earn) => (
                     <tr key={earn.id}>
                       <td className="py-3.5 font-bold text-slate-800">{earn.name}</td>
                       <td className="py-3.5 text-slate-500 font-mono">{earn.date}</td>
@@ -506,16 +497,13 @@ export const DashboardMember: React.FC<DashboardMemberProps> = ({
                       </td>
                     </tr>
                   ))}
-                  {/* Total Share summary rule */}
-                  <tr className="bg-slate-50 font-bold border-t border-slate-200">
-                    <td className="py-3 px-2 text-slate-700" colSpan={3}>Aggregate Personal Income</td>
-                    <td className="py-3 text-right text-emerald-800 font-extrabold font-mono text-xs">
-                      ₹{(mockEarnings.reduce((acc, curr) => acc + curr.share, 0))}
-                    </td>
-                    <td />
-                  </tr>
                 </tbody>
               </table>
+              {earnings.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  No payment share records have been assigned to this member yet.
+                </div>
+              )}
             </div>
             
             <div className="mt-4 p-3 rounded-lg bg-slate-50/50 border border-slate-200/60 text-[10px] text-slate-500 leading-relaxed font-sans">
@@ -531,6 +519,11 @@ export const DashboardMember: React.FC<DashboardMemberProps> = ({
             </h4>
 
             <div className="space-y-4">
+              {events.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  No choir events have been scheduled yet.
+                </div>
+              )}
               {events.slice(0, 3).map((evt) => {
                 const currentRsvp = evt.rsvps[memberId] || 'Maybe';
                 return (
@@ -731,10 +724,10 @@ export const DashboardMember: React.FC<DashboardMemberProps> = ({
               <div className="flex justify-between items-center">
                 <button
                   type="button"
-                  onClick={() => alert("Photo upload simulated: Image attached successfully! Ready for server proxy uploading.")}
+                  disabled
                   className="text-[10px] text-slate-500 hover:text-slate-700 flex items-center gap-1 font-medium bg-slate-105 px-2 py-1 rounded border border-slate-200 cursor-pointer transition"
                 >
-                  <Camera className="w-3.5 h-3.5 text-slate-400" /> Attach Photo
+                  <Camera className="w-3.5 h-3.5 text-slate-400" /> Photo upload unavailable
                 </button>
                 <button
                   type="submit"
@@ -747,6 +740,11 @@ export const DashboardMember: React.FC<DashboardMemberProps> = ({
 
             {/* Prayers List Feed */}
             <div className="space-y-3.5 pt-2" id="prayers-forum-feed">
+              {prayers.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  No prayer requests have been posted yet.
+                </div>
+              )}
               {prayers.map((pr) => (
                 <div key={pr.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition space-y-2.5">
                   <div className="flex justify-between items-start">

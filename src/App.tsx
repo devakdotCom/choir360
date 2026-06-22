@@ -100,6 +100,16 @@ const ModuleSkeleton = () => (
   </div>
 );
 
+const NoMemberProfile = () => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+    <UsersRound className="mx-auto h-10 w-10 text-slate-300" />
+    <h2 className="mt-4 text-lg font-bold text-slate-900">No member profile yet</h2>
+    <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+      Create or approve a real choir member profile to unlock the member dashboard.
+    </p>
+  </div>
+);
+
 export default function App() {
   const [currentLang, setCurrentLang] = useState<Language>('en');
   const [activeTab, setActiveTab] = useState<Tab>('landing');
@@ -230,8 +240,7 @@ export default function App() {
     void memberSync.patch(memberId, { status, correctionNote: note ?? '' });
   };
 
-  // Find the current member for gamification (logged-in user or first mock member)
-  const currentMember = members.find((m) => m.id === (authState.user?.uid ?? 'M001')) ?? members[0];
+  const currentMember = members.find((m) => m.id === authState.user?.uid) ?? members[0];
 
   const activeLabel = navItems.find((item) => item.id === activeTab)?.label ?? 'Overview';
   const pendingCount = members.filter((m) => m.status === 'Pending').length;
@@ -428,13 +437,15 @@ export default function App() {
             )}
             {activeTab === 'dashboard_member' && (
               guard.canAccess('choir_member') ? (
-                <DashboardMember currentLang={currentLang} memberId={authState.user?.uid ?? 'M001'}
-                  members={members} events={events} masses={masses}
-                  onUpdateMemberDetails={(updated) => void memberSync.upsert({ ...updated, ...createRecordMetadata(authState.user?.uid ?? updated.id, updated.status) }, authState.user?.uid)}
-                  onUpdateEventRsvp={(eventId, memberId, status) => {
-                    const event = events.find((item) => item.id === eventId);
-                    if (event) void eventSync.patch(eventId, { rsvps: { ...event.rsvps, [memberId]: status } }, authState.user?.uid);
-                  }} />
+                currentMember ? (
+                  <DashboardMember currentLang={currentLang} memberId={authState.user?.uid ?? currentMember.id}
+                    members={members} events={events} masses={masses}
+                    onUpdateMemberDetails={(updated) => void memberSync.upsert({ ...updated, ...createRecordMetadata(authState.user?.uid ?? updated.id, updated.status) }, authState.user?.uid)}
+                    onUpdateEventRsvp={(eventId, memberId, status) => {
+                      const event = events.find((item) => item.id === eventId);
+                      if (event) void eventSync.patch(eventId, { rsvps: { ...event.rsvps, [memberId]: status } }, authState.user?.uid);
+                    }} />
+                ) : <NoMemberProfile />
               ) : <AccessDenied requiredRole="choir_member" />
             )}
             {activeTab === 'song_library' && <SongLibraryWidget currentLang={currentLang} songs={ALL_SONGS} />}

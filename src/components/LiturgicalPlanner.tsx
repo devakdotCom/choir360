@@ -52,13 +52,8 @@ const createFallbackPlan = (season: string, vestmentColor: string): Omit<Liturgi
     { ref: 'See Lectionary', theme: 'Use the appointed readings for this Mass.' },
   ],
   homilySuggestion: "Select music after reviewing the day's readings, feast, and parish context.",
-  songs: [
-    { position: 'Entrance', tamilTitle: 'Select from imported songbook', englishTitle: 'Imported PDF song page', composer: 'Unknown', rationale: 'Choose a suitable opening hymn from the PDF Music Library.', liturgicalFit: 'Acceptable' },
-    { position: 'Offertory', tamilTitle: 'Select from imported songbook', englishTitle: 'Imported PDF song page', composer: 'Unknown', rationale: 'Choose a song that supports offering and thanksgiving.', liturgicalFit: 'Acceptable' },
-    { position: 'Communion', tamilTitle: 'Select from imported songbook', englishTitle: 'Imported PDF song page', composer: 'Unknown', rationale: 'Choose a reverent Eucharistic song from the imported PDF.', liturgicalFit: 'Acceptable' },
-    { position: 'Recessional', tamilTitle: 'Select from imported songbook', englishTitle: 'Imported PDF song page', composer: 'Unknown', rationale: 'Choose a sending hymn from the PDF Music Library.', liturgicalFit: 'Acceptable' },
-  ],
-  choirNotes: 'Fallback plans no longer contain demo song titles. Open Music Library and select exact songs from the imported PDF source.',
+  songs: [],
+  choirNotes: 'Open Music Library and select exact songs from the imported PDF source.',
 });
 
 const BUILT_IN_PLANS: Record<string, Omit<LiturgicalPlan, 'feast' | 'date'>> = {
@@ -268,6 +263,11 @@ export const LiturgicalPlanner: React.FC = () => {
                 Suggested Song Program
               </h3>
               <div className="space-y-3">
+                {plan.songs.length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                    No song suggestions are prefilled. Select real songs from the imported PDF Music Library.
+                  </div>
+                )}
                 {plan.songs.map((s, i) => (
                   <div key={i} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
                     <div className="flex items-start justify-between gap-2">

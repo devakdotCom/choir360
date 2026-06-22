@@ -73,8 +73,10 @@ export const AiToolsHub: React.FC<AiToolsHubProps> = ({
       const resData = await response.json();
       setRecoData(resData);
     } catch {
-      // simulated fallback
-      setRecoData(getSimulatedReco(recMassType, recSeason, recLang));
+      setRecoData({
+        explanation: 'AI song recommendations are unavailable. Use the imported PDF Music Library to select exact songs.',
+        recommendedSongs: [],
+      });
     } finally {
       setRecoLoading(false);
     }
@@ -99,7 +101,14 @@ export const AiToolsHub: React.FC<AiToolsHubProps> = ({
       const resData = await response.json();
       setOptData(resData);
     } catch {
-      setOptData(getSimulatedOpt(members, targetMass));
+      setOptData({
+        balanceScore: 0,
+        evaluation: 'AI schedule optimization is unavailable. Add real members and masses, then retry when the AI service is connected.',
+        vocalBalanceStatus: 'Unavailable',
+        instrumentalStatus: 'Unavailable',
+        structuralSuggestions: [],
+        safetyAlerts: ['AI optimization service is unavailable.'],
+      });
     } finally {
       setOptLoading(false);
     }
@@ -123,53 +132,16 @@ export const AiToolsHub: React.FC<AiToolsHubProps> = ({
       const resData = await response.json();
       setGenData(resData);
     } catch {
-      setGenData(getSimulatedGen(genType, genDetails, currentLang));
+      setGenData({
+        subject: 'AI content generation unavailable',
+        body: 'The AI content service is not available right now. Please retry after the server route is connected.',
+        closing: '',
+      });
     } finally {
       setGenLoading(false);
     }
   };
 
-
-  // --- Simulated Fallbacks for Zero Network Latency ---
-  const getSimulatedReco = (type: string, season: string, lang: string) => ({
-    explanation: `Liturgical recommendation model: Optimized for a ${type} during ${season}. Select final songs from the imported PDF Music Library.`,
-    recommendedSongs: [
-      { type: 'Entrance Hymn', title: 'Select from imported songbook', liturgicalReasoning: 'Choose a suitable opening hymn from the provided PDF source.' },
-      { type: 'Offertory Hymn', title: 'Select from imported songbook', liturgicalReasoning: 'Choose a song that supports offering and thanksgiving.' },
-      { type: 'Communion Hymn', title: 'Select from imported songbook', liturgicalReasoning: 'Choose a reverent Eucharistic song from the imported PDF.' },
-      { type: 'Recessional Hymn', title: 'Select from imported songbook', liturgicalReasoning: 'Choose a sending hymn from the PDF Music Library.' },
-    ],
-  });
-
-
-  const getSimulatedOpt = (mList: Member[], mass: Mass) => {
-    const active = mList.filter(m => m.status === 'Active Member');
-    const keyboard = active.find(m => m.memberType === 'Keyboard');
-    const bScore = keyboard ? 92 : 60;
-    return {
-      balanceScore: bScore,
-      evaluation: `Analyzed ${active.length} active members against mass calendar target: "${mass?.name || 'Upcoming Liturgy'}".`,
-      vocalBalanceStatus: "Vocal Registers: Sopranos (Defended), Basses (Stabilized). Tenor coverage requires additional backup.",
-      instrumentalStatus: keyboard ? "Organist secured: Amal Joseph (Keyboard) is confirmed." : "URGENT WARNING: No Keyboardist logged!",
-      structuralSuggestions: [
-        "Position keyboard on volume step 4 to allow Alto vocals to penetrate naturally.",
-        "Request Soprano Solo for Communion anthem prelude.",
-        "Ensure emergency backup contact files are ready for key organists."
-      ],
-      safetyAlerts: keyboard ? [] : ["Roster critical: Complete keyboard blackout scheduled!"]
-    };
-  };
-
-  const getSimulatedGen = (type: string, detail: string, lang: string) => {
-    const isTamil = lang === 'ta';
-    return {
-      subject: isTamil ? "ஆசீர்வதிக்கப்பட்ட தேவாலய அறிவிப்பு" : "Blessed Choir Notification Bulletin",
-      body: isTamil
-        ? `அன்பார்ந்த பாடகர் குழு உறவுகளே, \n\nதயவுசெய்து கவனிக்கவும்: ${detail || 'எதிர்வரும் தூய அந்தோணியார் திருவிழா மற்றும் பாடல் பயிற்சி'}.\n\nஅனைத்து உறுப்பினர்களும் தங்களின் உரிய மேலாடை உடைகளுடன் குறித்த நேரத்திற்கு முன்பே பலகணிக்கு வருமாறு அன்போடு கேட்டுக்கொள்கிறோம்.`
-        : `Dear Choir Members,\n\nKindly note the following circular details: ${detail || 'Upcoming Sunday rehearsals and Holy mass orchestration schedule'}.\n\nPlease ensure your availability stats are updated properly.`,
-      closing: isTamil ? "இவ்வண்ணம், பாடகர் குழு தலைவர் மற்றும் பங்குப் பேரவை." : "Peace be with you, Choir Director Core Team."
-    };
-  };
 
   return (
     <div className="space-y-8 animate-fade-in text-slate-800" id="ai-tools-hub-panel">
@@ -358,7 +330,7 @@ export const AiToolsHub: React.FC<AiToolsHubProps> = ({
                 <textarea
                   value={genDetails}
                   onChange={e => setGenDetails(e.target.value)}
-                  placeholder="e.g. Antony Michael (M001). Reached 5 consecutive service years. Include a blessing."
+                  placeholder="Enter the real member name, ministry context, date, and message details."
                   className="w-full p-2.5 rounded-lg border border-slate-200 h-28 font-sans"
                   required
                 />

@@ -47,11 +47,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     activeMembers.reduce((sum, member) => sum + (member.attendanceRate ?? 0), 0) / Math.max(activeMembers.length, 1),
   );
 
-  const servicePlan = [
-    { label: 'Entrance', title: 'Select from imported songbook', meta: 'PDF Music Library', ready: true },
-    { label: 'Offertory', title: 'Select from imported songbook', meta: 'PDF Music Library', ready: true },
-    { label: 'Communion', title: 'Select from imported songbook', meta: 'PDF Music Library', ready: false },
-  ];
+  const servicePlan: Array<{ label: string; title: string; meta: string; ready: boolean }> = [];
   return (
     <div className="space-y-6 animate-fade-in">
       <section className="overflow-hidden rounded-[28px] bg-[#18392f] text-white shadow-[0_24px_80px_rgba(18,52,43,0.18)]">
@@ -139,6 +135,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <button onClick={() => onNavigate('song_library')} className="text-xs font-bold text-emerald-700">Open library</button>
           </div>
           <div className="mt-5 divide-y divide-slate-100">
+            {servicePlan.length === 0 && (
+              <button onClick={() => onNavigate('song_library')} className="flex w-full items-center gap-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-left">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-emerald-700">
+                  <Music2 className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-slate-800">No songs selected yet</p>
+                  <p className="text-xs text-slate-500">Open the imported PDF Music Library to build the liturgy plan.</p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-slate-300" />
+              </button>
+            )}
             {servicePlan.map((song) => (
               <button key={song.label} onClick={() => onNavigate('song_library')} className="flex w-full items-center gap-4 py-4 text-left">
                 <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${song.ready ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>

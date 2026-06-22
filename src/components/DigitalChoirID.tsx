@@ -3,7 +3,7 @@
  *
  * Renders a printable/shareable choir ID card for the logged-in member.
  * QR encodes a signed attendance check-in payload:
- *   choir360://checkin?memberId=M001&ts=<unix>&sig=<hmac-sha256-first8>
+ *   choir360://checkin?memberId=<member-id>&ts=<unix>&sig=<hmac-sha256-first8>
  * (HMAC key is the choirId – sufficient for soft attendance confirmation;
  *  server-side verification uses Firestore + Admin SDK for authoritative check-in.)
  *
