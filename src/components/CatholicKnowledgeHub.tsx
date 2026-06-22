@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BookOpen, Star, Calendar, Heart, Search, Newspaper, RefreshCw, ExternalLink, ShieldCheck, Lock } from 'lucide-react';
 import { apiFetch } from '../services/apiClient';
 import { useFirebaseAuth, hasMinimumRole } from '../hooks/useFirebaseAuth';
+import { DailyReadingsCard } from './bible/DailyReadingsCard';
 
 // ─── Static Saints Database (June focus) ────────────────────────────────────
 const SAINTS_DATABASE = [
@@ -140,19 +141,6 @@ const UPCOMING_FEASTS_2026 = [
   { date: '2026-12-08', name: 'Immaculate Conception',          type: 'Solemnity', color: 'white', vestment: 'White' },
   { date: '2026-12-25', name: 'Nativity of Our Lord',           type: 'Solemnity', color: 'white', vestment: 'White' },
 ];
-
-// ─── Daily Gospel (mock – real data would come from catholictamil.com/daily) ─
-const MOCK_GOSPEL = {
-  date: '2026-06-16',
-  season: 'Ordinary Time - Week 11',
-  readings: [
-    { label: 'First Reading', ref: '1 Kings 21:17-29', summary: 'Elijah confronts Ahab about Naboth\'s vineyard. God\'s justice and mercy revealed.' },
-    { label: 'Psalm', ref: 'Psalm 51:3-6, 11, 16-17', summary: 'Have mercy on me, O God, in your kindness. A broken spirit you will not scorn.' },
-    { label: 'Gospel', ref: 'Matthew 5:43-48', summary: 'Love your enemies and pray for those who persecute you, so that you may be children of your Father in heaven.' },
-  ],
-  reflection: 'Today\'s Gospel challenges us to go beyond human love—which loves only those who love us—to divine love which extends even to enemies. The call to "be perfect as your heavenly Father is perfect" is a call to participate in God\'s own nature of unconditional love.',
-  tamilReflection: 'இன்றைய நற்செய்தியில் இயேசு நம்மை சவாலாக அழைக்கிறார்: நம்மை வெறுப்பவர்களையும் நேசிக்க வேண்டும். இது மனித இயல்புக்கு எதிரானது, ஆனால் தெய்வீக அன்பின் குணம் இதுவே.',
-};
 
 // ─── Catholic Hub live content (synced from catholictamil.com) ─────────────
 interface CatholicHubContentItem {
@@ -294,46 +282,11 @@ export const CatholicKnowledgeHub: React.FC = () => {
           ))}
         </div>
 
-        {/* Gospel Tab */}
+        {/* Gospel Tab — same live-synced reading card used in the Bible section,
+            so the date here always matches today and never goes stale. */}
         {tab === 'gospel' && (
           <div className="space-y-4">
-            <div className="rounded-3xl border border-amber-100 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-amber-700">
-                    {MOCK_GOSPEL.date} — {MOCK_GOSPEL.season}
-                  </p>
-                  <h2 className="mt-1 text-lg font-black text-slate-900">Today's Readings</h2>
-                </div>
-                <button
-                  onClick={() => setShowTamil(!showTamil)}
-                  className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-amber-200 px-3 py-2 text-xs font-bold text-amber-800"
-                >
-                  {showTamil ? '🇬🇧 EN' : '🇮🇳 தமிழ்'}
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {MOCK_GOSPEL.readings.map((r) => (
-                  <div key={r.label} className="rounded-2xl bg-amber-50 p-4">
-                    <div className="mb-1 flex items-center gap-2">
-                      <span className="rounded-lg bg-amber-800 px-2 py-0.5 text-[10px] font-black text-white">
-                        {r.label}
-                      </span>
-                      <span className="text-xs font-bold text-amber-700">{r.ref}</span>
-                    </div>
-                    <p className="text-xs text-slate-700">{r.summary}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-green-100 bg-white p-6 shadow-sm">
-              <h3 className="mb-3 font-black text-slate-900">Reflection</h3>
-              <p className="text-sm leading-relaxed text-slate-700">
-                {showTamil ? MOCK_GOSPEL.tamilReflection : MOCK_GOSPEL.reflection}
-              </p>
-            </div>
+            <DailyReadingsCard />
           </div>
         )}
 
