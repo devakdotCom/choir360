@@ -8,26 +8,33 @@ interface StreamInfo {
   title: string;
 }
 
+// Known-good direct stream URL — used immediately without waiting for the backend
+const FALLBACK_STREAM_URL = 'https://listen.radioking.com/radio/224683/stream/268186';
+
 export const RadioPlayer: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
+  const [streamInfo, setStreamInfo] = useState<StreamInfo>({
+    streamUrl: FALLBACK_STREAM_URL,
+    artist: '',
+    title: '',
+  });
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch stream URL once on mount
+  // Fetch track info (artist/title) from backend — non-blocking, doesn't gate playback
   useEffect(() => {
     const load = async () => {
       try {
         const res = await apiFetch('/api/radio/stream-url');
         const data = await res.json() as StreamInfo;
-        setStreamInfo(data);
-      } catch {
-        setError('Could not reach radio server.');
-      } finally {
-        setLoading(false);
-      }
+        setStreamInfo((prev) => ({
+          streamUrl: data.streamUrl || prev.streamUrl, // prefer backend URL if resolved
+          artist: data.artist,
+          title: data.title,
+        }));
+      } catch { /* silent — fallback URL already set */ }
     };
     void load();
   }, []);
@@ -186,19 +193,9 @@ export const RadioPlayer: React.FC = () => {
         </div>
       )}
 
-      {/* Iframe fallback: shown only if backend couldn't resolve stream URL */}
-      {!loading && !streamInfo?.streamUrl && (
-        <div className="mt-3 overflow-hidden rounded-xl">
-          <iframe
-            src="https://www.radioking.com/play/catholic-tamil"
-            title="Catholic Tamil Radio"
-            width="100%"
-            height="60"
-            frameBorder="0"
-            allow="autoplay"
-            className="w-full"
-          />
-        </div>
+      {/* Error message */}
+      {error && (
+        <p className="mt-2 text-[10px] text-red-300/80">{error}</p>
       )}
 
       <style>{`
