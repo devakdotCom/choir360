@@ -1189,24 +1189,78 @@ app.post("/api/catholic-hub/sync", requireFirebaseAuth, requireAdminRole, async 
 });
 
 // ─── Catholic Tamil Radio — RadioKing stream proxy ────────────────────────────
-app.get("/api/radio/stream-url", async (_req, res) => {
-  try {
-    const response = await fetch(
-      "https://api.radioking.io/widget/radio/catholic-tamil/track/current",
-      { headers: { "User-Agent": "Choir360/1.0 (+catholic-tamil-radio-player)" } }
-    );
-    if (!response.ok) throw new Error(`RadioKing API returned ${response.status}`);
-    const data = await response.json() as Record<string, unknown>;
-    return res.json({
-      streamUrl: (data.radio_url as string) || null,
-      artist: data.artist || "",
-      title: data.title || "Catholic Tamil Radio",
-      cover: data.cover || null,
-    });
-  } catch (error: any) {
-    console.warn("[Radio] RadioKing API error:", error?.message);
-    return res.status(502).json({ error: "Radio stream unavailable.", streamUrl: null });
+
+/** Picks first truthy string value from an object by trying multiple keys. */
+function pickUrl(obj: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.startsWith("http")) return v;
   }
+  return null;
+}
+
+app.get("/api/radio/stream-url", async (_req, res) => {
+  const UA = "Choir360/1.0 (+catholic-tamil-radio-player)";
+  let streamUrl: string | null = null;
+  let artist = "";
+  let title = "Catholic Tamil Radio";
+
+  // ── Approach 1: track/current endpoint ──────────────────────────────────────
+  try {
+    const r = await fetch(
+      "https://api.radioking.io/widget/radio/catholic-tamil/track/current",
+      { headers: { "User-Agent": UA } }
+    );
+    if (r.ok) {
+      const d = await r.json() as Record<string, unknown>;
+      console.log("[Radio] track/current keys:", Object.keys(d).join(", "));
+      streamUrl = pickUrl(d, "radio_url", "stream_url", "url", "listen_url", "radioUrl", "streamUrl");
+      artist = String(d.artist || "");
+      title  = String(d.title  || "Catholic Tamil Radio");
+    }
+  } catch (e: any) {
+    console.warn("[Radio] track/current error:", e?.message);
+  }
+
+  // ── Approach 2: widget station info endpoint ─────────────────────────────────
+  if (!streamUrl) {
+    try {
+      const r = await fetch(
+        "https://api.radioking.io/widget/radio/catholic-tamil",
+        { headers: { "User-Agent": UA } }
+      );
+      if (r.ok) {
+        const d = await r.json() as Record<string, unknown>;
+        console.log("[Radio] widget keys:", Object.keys(d).join(", "));
+        streamUrl = pickUrl(d, "radio_url", "stream_url", "url", "listen_url", "radioUrl", "streamUrl");
+      }
+    } catch (e: any) {
+      console.warn("[Radio] widget endpoint error:", e?.message);
+    }
+  }
+
+  // ── Approach 3: parse the play page HTML for a stream URL ────────────────────
+  if (!streamUrl) {
+    try {
+      const r = await fetch("https://www.radioking.com/play/catholic-tamil", {
+        headers: { "User-Agent": UA, Accept: "text/html" },
+      });
+      if (r.ok) {
+        const html = await r.text();
+        // Look for listen.radioking.com stream URLs embedded in page JS/JSON
+        const match = html.match(/https:\/\/listen\.radioking\.com\/radio\/[\w\/]+/);
+        if (match) {
+          streamUrl = match[0];
+          console.log("[Radio] stream URL extracted from play page:", streamUrl);
+        }
+      }
+    } catch (e: any) {
+      console.warn("[Radio] play page scrape error:", e?.message);
+    }
+  }
+
+  console.log("[Radio] final streamUrl:", streamUrl);
+  return res.json({ streamUrl, artist, title });
 });
 
 app.post("/api/cloudinary/signature", uploadLimiter, requireFirebaseAuth, (req, res) => {

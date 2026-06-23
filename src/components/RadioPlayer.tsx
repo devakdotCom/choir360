@@ -144,8 +144,6 @@ export const RadioPlayer: React.FC = () => {
           <p className="mt-0.5 truncate text-[10px] text-emerald-100/60">
             {loading
               ? 'Connecting...'
-              : error
-              ? error
               : isPlaying
               ? 'Now playing'
               : 'Tap to listen live'}
@@ -185,6 +183,21 @@ export const RadioPlayer: React.FC = () => {
               }}
             />
           ))}
+        </div>
+      )}
+
+      {/* Iframe fallback: shown only if backend couldn't resolve stream URL */}
+      {!loading && !streamInfo?.streamUrl && (
+        <div className="mt-3 overflow-hidden rounded-xl">
+          <iframe
+            src="https://www.radioking.com/play/catholic-tamil"
+            title="Catholic Tamil Radio"
+            width="100%"
+            height="60"
+            frameBorder="0"
+            allow="autoplay"
+            className="w-full"
+          />
         </div>
       )}
 
