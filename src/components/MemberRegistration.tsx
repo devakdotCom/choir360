@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { MULTILINGUAL_DICTIONARY } from '../data/mockData';
 import { uploadMediaToCloudinary, validateMediaFile } from '../services/cloudinary';
+import { useParish } from '../features/parish/ParishContext';
+import { activeParishes } from '../data/madrasMylaporeParishes';
 
 interface MemberRegistrationProps {
   currentLang: Language;
@@ -35,6 +37,8 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({
 }) => {
   const dict = MULTILINGUAL_DICTIONARY[currentLang] || MULTILINGUAL_DICTIONARY.en;
   const isAdmin = ['super_admin', 'diocese_admin', 'parish_admin', 'choir_admin'].includes(currentUserRole);
+  const { selectedParish } = useParish();
+  const parishes = activeParishes();
 
   // State for form
   const [photoUrl, setPhotoUrl] = useState('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
@@ -49,8 +53,8 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({
   const [whatsapp, setWhatsapp] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
-  const [parish, setParish] = useState('Our Lady of Snows Basilica, Thoothukudi');
-  const [choirName, setChoirName] = useState('St. Thomas Cathedral Choir');
+  const [parish, setParish] = useState(() => selectedParish?.displayName ?? '');
+  const [choirName, setChoirName] = useState(() => selectedParish ? `${selectedParish.parishName} Choir` : '');
   const [voiceType, setVoiceType] = useState<VoiceType>('Soprano');
   const [memberType, setMemberType] = useState<MemberType>('Singer');
   const [skills, setSkills] = useState('');
@@ -287,13 +291,18 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-500 uppercase">Parish of Origin</label>
-                <input
-                  type="text"
+                <label className="text-[11px] font-bold text-slate-500 uppercase">Parish <span className="text-red-500">*</span></label>
+                <select
                   value={parish}
                   onChange={(e) => setParish(e.target.value)}
-                  className="w-full text-xs px-3 py-3 min-h-[44px] rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
+                  required
+                  className="w-full text-xs px-3 py-3 min-h-[44px] rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white"
+                >
+                  <option value="">— Select parish —</option>
+                  {parishes.map((p) => (
+                    <option key={p.id} value={p.displayName}>{p.displayName}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-1">

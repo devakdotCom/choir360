@@ -37,16 +37,28 @@ service cloud.firestore {
         && request.resource.data.choirId == myChoirId();
     }
 
-    /** Existing document belongs to the caller's tenant. */
+    /** Existing document belongs to the caller's tenant (or caller is super_admin). */
     function existingInTenant() {
       return signedIn()
-        && resource.data.tenantId == myTenantId();
+        && (superAdmin() || resource.data.tenantId == myTenantId());
     }
 
     /** Caller has an admin-level custom claim role. */
     function adminRole() {
       return signedIn()
         && request.auth.token.role in ['super_admin', 'diocese_admin', 'parish_admin', 'choir_admin'];
+    }
+
+    /** Super admin — cross-parish read/write with no tenant restriction. */
+    function superAdmin() {
+      return signedIn() && request.auth.token.role == 'super_admin';
+    }
+
+    /** Parish admin scoped to their own parishId via custom claim. */
+    function parishAdminForThisDoc() {
+      return signedIn()
+        && request.auth.token.role in ['parish_admin', 'choir_admin']
+        && resource.data.parishId == myParishId();
     }
 
     /** Caller is a verified choir member or higher. */
@@ -382,26 +394,59 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // PARISHES — master list for Archdiocese of Madras-Mylapore
+    // Public can read (needed for parish selector at first visit).
+    // Only super_admin / diocese_admin can write.
+    // =========================================================================
+    match /parishes/{parishId} {
+      // Public read — parish names and places are not sensitive
+      allow read: if true;
+
+      // Only super/diocese admin can create or update parish records
+      allow create: if signedIn()
+        && request.auth.token.role in ['super_admin', 'diocese_admin']
+        && request.resource.data.keys().hasAll([
+          'id', 'archdioceseId', 'parishName', 'place', 'displayName',
+          'slug', 'status', 'createdAt', 'updatedAt'
+        ]);
+
+      allow update: if signedIn()
+        && request.auth.token.role in ['super_admin', 'diocese_admin'];
+
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // ADMINS — one primary admin per parish
+    // Parish admin doc lives here so cross-parish uniqueness can be checked
+    // by Cloud Functions / backend. Firestore rules cannot enforce uniqueness
+    // alone; the backend validates isPrimaryAdmin before writing.
+    // =========================================================================
+    match /admins/{uid} {
+      // Super admin reads all; parish admin reads own record only
+      allow read: if signedIn()
+        && (superAdmin() || request.auth.uid == uid);
+
+      // Only super_admin can grant/revoke admin roles
+      allow create, update: if superAdmin()
+        && request.resource.data.keys().hasAll([
+          'uid', 'email', 'displayName', 'role',
+          'archdioceseId', 'parishId', 'isPrimaryAdmin', 'status',
+          'createdAt', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // =========================================================================
     // AUDIT LOGS – server-write only, admin-read only
     // No client can write audit logs. They are created exclusively by
     // Firebase Admin SDK (server.ts / Cloud Functions).
     // =========================================================================
     match /auditLogs/{auditId} {
-      allow read: if adminRole()
-        && existingInTenant()
-        && notDeleted();
-
-      // Explicitly deny all client writes (including from admin users).
+      allow read: if adminRole() && existingInTenant();
       allow create, update, delete: if false;
     }
 
-    // =========================================================================
-    // CATCH-ALL DENY
-    // Any collection not matched above is denied by default.
-    // This is belt-and-suspenders: Firestore denies by default anyway.
-    // =========================================================================
-    match /{document=**} {
-      allow read, write: if false;
-    }
   }
 }

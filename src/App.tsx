@@ -15,6 +15,9 @@ import { useMembersWithPrivateData } from './hooks/useMembersWithPrivateData';
 import { useFirebaseAuth } from './hooks/useFirebaseAuth';
 import { useRoleGuard } from './hooks/useRoleGuard';
 import { createRecordMetadata } from './services/recordMetadata';
+import { ParishProvider } from './features/parish/ParishContext';
+import { ParishSidebarCard, ParishOnboardingModal } from './features/parish/ParishSelector';
+import { useParish } from './features/parish/ParishContext';
 
 const ALL_SONGS = JEBATHOTTA_JEYAGEETHANGAL_SONGS;
 
@@ -105,6 +108,17 @@ const NoMemberProfile = () => (
     </p>
   </div>
 );
+
+// Reads parish from context for breadcrumb — defined here to avoid prop drilling
+const BreadcrumbParishLabel: React.FC = () => {
+  const { selectedParish } = useParish();
+  const name = selectedParish ? selectedParish.parishName : 'Archdiocese of Madras-Mylapore';
+  return (
+    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+      {name} / Choir
+    </p>
+  );
+};
 
 export default function App() {
   const [currentLang, setCurrentLang] = useState<Language>('en');
@@ -242,6 +256,8 @@ export default function App() {
   const pendingCount = members.filter((m) => m.status === 'Pending').length;
 
   return (
+    <ParishProvider>
+    <ParishOnboardingModal />
     <div className="min-h-[100dvh] bg-[#f6f7f5] text-slate-800">
       {/* HEADER */}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#102d26] text-white">
@@ -337,21 +353,18 @@ export default function App() {
       <div className="mx-auto flex max-w-[1600px]">
         {/* SIDEBAR */}
         <aside className={(mobileNavOpen ? 'fixed inset-x-0 top-16 z-40 flex' : 'hidden') + ' min-h-[calc(100dvh-4rem)] w-64 flex-col border-r border-slate-200/80 bg-white p-4 lg:sticky lg:top-16 lg:flex'}>
-          <div className="rounded-2xl bg-[#eef4f1] p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-emerald-800 shadow-sm">
-                <Church className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-slate-900">St. Thomas Cathedral</p>
-                <p className="text-[10px] text-slate-500">Cathedral Choir · {ALL_SONGS.length} Songs</p>
-              </div>
-            </div>
-            <div className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-[10px] font-semibold text-slate-500">
-              Sync: <span className={membersLive ? 'text-emerald-700' : 'text-amber-700'}>{membersLive ? 'Firebase live' : syncEnabled ? 'Connecting...' : 'Sign in required'}</span>
-              {membersSyncError && <span className="block truncate text-rose-600">{membersSyncError}</span>}
-            </div>
-          </div>
+          <ParishSidebarCard
+            songCount={ALL_SONGS.length}
+            syncStatus={
+              <>
+                Sync:{' '}
+                <span className={membersLive ? 'text-emerald-700' : 'text-amber-700'}>
+                  {membersLive ? 'Firebase live' : syncEnabled ? 'Connecting...' : 'Sign in required'}
+                </span>
+                {membersSyncError && <span className="block truncate text-rose-600">{membersSyncError}</span>}
+              </>
+            }
+          />
 
           <div className="mt-4">
             <AuthPanel user={authState.user} isConfigured={authState.isConfigured} authError={authState.authError}
@@ -388,7 +401,7 @@ export default function App() {
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">St. Thomas Cathedral / Choir</p>
+              <BreadcrumbParishLabel />
               <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">{activeLabel}</h1>
             </div>
             {guard.isAdmin && (
@@ -502,5 +515,6 @@ export default function App() {
       </nav>
       <div className="h-[calc(56px+env(safe-area-inset-bottom))] lg:hidden" aria-hidden="true" />
     </div>
+    </ParishProvider>
   );
 }

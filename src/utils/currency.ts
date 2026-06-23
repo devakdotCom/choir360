@@ -63,3 +63,30 @@ export const formatRegionalCurrencyCompact = (value: number) =>
     compactDisplay: 'short',
     maximumFractionDigits: 1,
   });
+
+// =============================================================================
+// INR-specific formatters (Archdiocese of Madras-Mylapore — India only)
+// Always uses en-IN locale and INR currency regardless of browser locale.
+// =============================================================================
+
+/**
+ * Format as Indian Rupees: ₹1,000 / ₹10,000 / ₹1,25,000
+ */
+export const formatINR = (value: number): string =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
+
+/**
+ * Compact INR: ₹1.2L, ₹5K
+ */
+export const formatINRCompact = (value: number): string =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    notation: 'compact',
+    compactDisplay: 'short',
+    maximumFractionDigits: 1,
+  }).format(Number.isFinite(value) ? value : 0);
