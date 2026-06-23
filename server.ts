@@ -1462,263 +1462,181 @@ app.post("/api/gemini/generate-content", aiLimiter, requireFirebaseAuth, require
   }
 });
 
-// 5. Smart Transliteration Search Endpoint
-app.post("/api/gemini/smart-search", aiLimiter, requireFirebaseAuth, requireUserAiQuota, async (req, res) => {
-  const { query, songsList } = req.body;
-  try {
-    requireString(query, "query", 200);
-  } catch (error: any) {
-    return res.status(400).json({ error: error.message });
-  }
-  if (!Array.isArray(songsList) || songsList.length > 500) {
-    return res.status(400).json({ error: "songsList must be an array with at most 500 records." });
-  }
 
-  const prompt = `
-    We operate a Roman Catholic Song Smart Search Engine with phonetic transliteration.
-    User query: "${query}"
-    Available Choir Songs database: ${JSON.stringify(songsList)}
-    
-    Please perform:
-    1. Search only within the provided song records.
-    2. Match title, category, author/composer, lyrics, transliteration, and sourceSearchText when present.
-    3. Return only IDs that exist in the provided database.
-    
-    Return a ranked array of Song IDs from the provided database that best match the user's search query, and a short explanation for why it matches.
-    
-    Return JSON with this structure:
-    {
-      "matchedSongIds": ["JJ001", "JJ002"],
-      "searchMethod": "PDF Songbook Full-Text Match",
-      "explanation": "Matched the query against the imported PDF songbook index."
-    }
-    Return ONLY JSON. No markdown wrapper.
-  `;
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. Smart Transliteration Search
+// ─────────────────────────────────────────────────────────────────────────────
+app.post("/api/gemini/smart-search", aiLimiter, requireFirebaseAuth, requireUserAiQuota, async (req, res) => {
+  const { query, songs = [], language = "ta" } = req.body as {
+    query?: string;
+    songs?: Array<{ id: string; title: string; lyrics?: string }>;
+    language?: string;
+  };
+
+  if (!query || typeof query !== "string" || query.trim().length < 1) {
+    return res.status(400).json({ error: "query is required." });
+  }
+  const q = query.trim().slice(0, 200);
+
+  // Fallback: simple substring match on titles
+  function simulatedSearch() {
+    const lq = q.toLowerCase();
+    const matched = (songs as Array<{ id: string; title: string; lyrics?: string }>)
+      .filter((s) => s.title?.toLowerCase().includes(lq) || s.lyrics?.toLowerCase().includes(lq))
+      .slice(0, 10)
+      .map((s) => ({ id: s.id, title: s.title, score: 1 }));
+    return res.json({ results: matched, query: q, source: "local" });
+  }
 
   try {
     const ai = getGeminiClient();
-    if (ai) {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        }
-      });
-      const text = response.text || "{}";
-      const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
-      return res.json(JSON.parse(cleanJson));
-    } else {
-      return res.json(getSimulatedSmartSearch(query, songsList));
-    }
-  } catch (error) {
-    console.error("Gemini Smart Search Error:", error);
-    return res.json(getSimulatedSmartSearch(query, songsList));
+    if (!ai) return simulatedSearch();
+
+    const songList = (songs as Array<{ id: string; title: string }>)
+      .slice(0, 200)
+      .map((s, i) => `${i + 1}. [${s.id}] ${s.title}`)
+      .join("\n");
+
+    const prompt = `You are a Tamil Catholic song search assistant.
+User query: "${q}"
+Language preference: ${language}
+
+Song list (id and title):
+${songList}
+
+Return up to 10 matching songs as JSON array:
+[{"id":"<song_id>","title":"<song_title>","score":<0.0-1.0>}]
+Score 1.0 = perfect match. Return ONLY the JSON array, no extra text.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+      config: { responseMimeType: "application/json" },
+    });
+    const text = (response.text || "[]").replace(/```json|```/g, "").trim();
+    const results = JSON.parse(text);
+    return res.json({ results, query: q, source: "gemini" });
+  } catch (error: any) {
+    console.warn("[SmartSearch] Gemini failed, falling back to local:", error?.message);
+    return simulatedSearch();
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SCHEDULED SYNC ENGINE
+// ─────────────────────────────────────────────────────────────────────────────
 
-// 6. AI Liturgical Planner Endpoint
-app.post("/api/gemini/liturgical-plan", aiLimiter, requireFirebaseAuth, requireUserAiQuota, async (req, res) => {
-  const { feast, date } = req.body as { feast: string; date: string };
-  if (!feast) return res.status(400).json({ error: "feast is required." });
-
-  const prompt = `
-You are an expert Roman Catholic liturgical music director specialising in Tamil Catholic worship.
-Generate a detailed Mass song program for:
-Feast/Occasion: ${feast}
-Date: ${date || "upcoming Sunday"}
-
-Respond ONLY with a JSON object matching this exact schema:
-{
-  "feast": "string",
-  "date": "string",
-  "season": "Advent | Christmas | Ordinary Time | Lent | Easter | Triduum",
-  "vestmentColor": "string",
-  "readings": [
-    { "ref": "scripture reference", "theme": "one sentence summary" }
-  ],
-  "homilySuggestion": "2–3 sentence homily direction",
-  "songs": [
-    {
-      "position": "Mass part name (with Tamil equivalent)",
-      "tamilTitle": "song title in Tamil script",
-      "englishTitle": "transliterated title",
-      "composer": "composer name",
-      "rationale": "why this song fits this position liturgically",
-      "liturgicalFit": "Perfect | Good | Acceptable"
-    }
-  ],
-  "choirNotes": "practical director notes for this celebration"
+/**
+ * Returns milliseconds until the next occurrence of a given IST hour (0-23).
+ * Used to align setInterval-based syncs to clock boundaries.
+ */
+function msUntilISTHour(targetHour: number): number {
+  const now = new Date();
+  // Current IST time
+  const istStr = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+  const ist = new Date(istStr);
+  const next = new Date(ist);
+  next.setHours(targetHour, 0, 0, 0);
+  if (next <= ist) next.setDate(next.getDate() + 1);
+  return next.getTime() - ist.getTime();
 }
-Suggest positions and selection criteria; final song titles must come from the imported PDF Music Library.
-Cover: Entrance, Kyrie, Gloria, Offertory, Communion, Thanksgiving, Recessional at minimum.
-`;
 
-  const geminiClient = getGeminiClient();
-  if (geminiClient) {
+/**
+ * Schedules a callback at a fixed IST hour, then repeats every 24h.
+ * Runs once immediately (on startup) then at each target hour.
+ */
+function scheduleDailyAt(istHour: number, label: string, fn: () => void) {
+  const delay = msUntilISTHour(istHour);
+  console.log(`[Scheduler] "${label}" first run in ${Math.round(delay / 60000)}m (IST ${String(istHour).padStart(2, '0')}:00)`);
+  setTimeout(() => {
+    fn();
+    setInterval(fn, 24 * 60 * 60 * 1000); // repeat every 24h
+  }, delay);
+}
+
+/**
+ * Daily Gospel / Mass Readings — synced 3× per day at IST 05:30, 12:00, 18:00.
+ * arulvakku.com publishes readings for the next day around midnight IST, so the
+ * 05:30 run captures them before morning prayer; 12:00 and 18:00 act as retries
+ * in case the morning fetch fails (Render free-tier cold start, network blip, etc.)
+ */
+function startReadingsSchedule() {
+  // Immediate startup sync
+  void syncTodayDailyReadings("startup");
+
+  // 05:30 IST — before morning prayer / Mass
+  scheduleDailyAt(5, "readings-0530", () => {
+    // fine-grain: fire at :30 past the hour
+    setTimeout(() => void syncTodayDailyReadings("scheduled"), 30 * 60 * 1000);
+  });
+  // 12:00 IST — midday retry
+  scheduleDailyAt(12, "readings-1200", () => void syncTodayDailyReadings("scheduled"));
+  // 18:00 IST — evening retry
+  scheduleDailyAt(18, "readings-1800", () => void syncTodayDailyReadings("scheduled"));
+}
+
+/**
+ * Catholic Hub content (catholictamil.com Atom feed) — synced once per day at
+ * IST 03:00 (off-peak). Also runs once at startup (non-blocking).
+ */
+function startCatholicHubSchedule() {
+  // Startup sync (non-blocking, already fires via syncCatholicHubOnStartup below)
+  scheduleDailyAt(3, "catholic-hub-0300", () => {
+    void syncCatholicHubContent("system-scheduled").then((r) =>
+      console.log(`[Catholic Hub] scheduled sync done — ${r.itemsSynced} items in ${r.durationMs}ms`)
+    ).catch((e: any) =>
+      console.warn("[Catholic Hub] scheduled sync failed:", e?.message)
+    );
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER FREE-TIER KEEP-ALIVE
+// Render spins down free services after 15 min of inactivity, which would kill
+// the node process and lose the scheduler timers. We self-ping /api/health
+// every 10 minutes to prevent spin-down.
+// ─────────────────────────────────────────────────────────────────────────────
+function startKeepAlive() {
+  const selfUrl = process.env.RENDER_EXTERNAL_URL
+    || process.env.APP_URL?.replace("web.app", "onrender.com")
+    || null;
+
+  if (!selfUrl) {
+    console.log("[KeepAlive] RENDER_EXTERNAL_URL not set — skipping self-ping (local dev mode).");
+    return;
+  }
+
+  const pingUrl = `${selfUrl}/api/health`;
+  setInterval(async () => {
     try {
-      const response = await geminiClient.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        config: { responseMimeType: "application/json" }
-      });
-      const text = response.text ?? "{}";
-      const clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
-      return res.json(JSON.parse(clean));
-    } catch (err) {
-      console.error("Liturgical Planner AI Error:", err);
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      await fetch(pingUrl, { signal: ctrl.signal });
+      clearTimeout(t);
+      console.log(`[KeepAlive] ping ok → ${pingUrl}`);
+    } catch {
+      // non-fatal — next ping will catch it
     }
-  }
-  // Fallback
-  return res.json({
-    feast,
-    date,
-    season: "Ordinary Time",
-    vestmentColor: "Green",
-    readings: [{ ref: "See Lectionary", theme: "God calls us to faithfulness in daily life" }],
-    homilySuggestion: "Reflect on the readings and how they speak to the local community.",
-    songs: [
-      { position: "Entrance", tamilTitle: "Select from imported songbook", englishTitle: "Imported PDF song page", composer: "Unknown", rationale: "Choose a suitable opening hymn from the PDF Music Library.", liturgicalFit: "Acceptable" },
-      { position: "Offertory", tamilTitle: "Select from imported songbook", englishTitle: "Imported PDF song page", composer: "Unknown", rationale: "Choose a song that supports offering and thanksgiving.", liturgicalFit: "Acceptable" },
-      { position: "Communion", tamilTitle: "Select from imported songbook", englishTitle: "Imported PDF song page", composer: "Unknown", rationale: "Choose a reverent Eucharistic song from the imported PDF.", liturgicalFit: "Acceptable" },
-    ],
-    choirNotes: "Plan well in advance and select exact song pages from the imported PDF Music Library.",
-  });
+  }, 10 * 60 * 1000); // every 10 minutes
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVER STARTUP
+// ─────────────────────────────────────────────────────────────────────────────
+const port = Number(process.env.PORT) || 3000;
+
+app.listen(port, () => {
+  console.log(`[Choir360 X] Server listening on port ${port}`);
+
+  // 1. Keep Render free dyno alive
+  startKeepAlive();
+
+  // 2. Daily Gospel / Mass Readings — 3× per day
+  startReadingsSchedule();
+
+  // 3. Catholic Hub (catholictamil.com) — once per day + startup
+  void syncCatholicHubOnStartup(); // immediate, non-blocking
+  startCatholicHubSchedule();
+
+  console.log("[Choir360 X] Sync schedulers started.");
 });
-
-// -----------------------------------------------------------------------------
-// AI FALLBACK SIMULATORS (Ensures absolute reliability if API key is not yet set)
-// -----------------------------------------------------------------------------
-
-function getSimulatedAssistantResponse(message: string, role: string, lang: string): string {
-  const query = message.toLowerCase();
-  const wantsSongs = query.includes("song") || query.includes("hymn") || query.includes("recommend") || query.includes("music") || query.includes("lyrics");
-
-  if (wantsSongs) {
-    return "Peace be with you. The Music Library is now sourced only from the imported Jebathotta Jeyageethangal PDF. Open Music Library, search the imported songbook, and select the exact PDF page for the Mass part you need. I will not suggest removed demo songs.";
-  }
-
-  return "Peace be with you! I am your **Choir360 Liturgical Assistant**. I can help with Catholic liturgical planning, choir roster balance, member coordination, and selecting songs from the imported PDF Music Library.";
-}
-
-function getSimulatedRecommendations(massType: string, season: string, language: string) {
-  return {
-    explanation: `Liturgical guidelines for ${massType} during the ${season} season. Select the final hymns from the imported PDF Music Library so the plan stays aligned with the current source of truth.`,
-    recommendedSongs: [
-      { type: "Entrance Hymn", title: "Select from imported songbook", liturgicalReasoning: "Choose a suitable opening hymn from the provided PDF source." },
-      { type: "Offertory Hymn", title: "Select from imported songbook", liturgicalReasoning: "Choose a song that supports offering and thanksgiving." },
-      { type: "Communion Hymn", title: "Select from imported songbook", liturgicalReasoning: "Choose a reverent Eucharistic song from the imported PDF." },
-      { type: "Recessional Hymn", title: "Select from imported songbook", liturgicalReasoning: "Choose a sending hymn from the PDF Music Library." },
-    ]
-  };
-}
-
-function getSimulatedOptimization(members: any[], massDetails: any) {
-  const activeMembers = members.filter((m: any) => m.status === 'Active Member');
-  const keyboardist = activeMembers.find((m: any) => m.memberType === 'Keyboard');
-  const sopranos = activeMembers.filter((m: any) => m.voiceType === 'Soprano');
-  const altos = activeMembers.filter((m: any) => m.voiceType === 'Alto');
-  const tenors = activeMembers.filter((m: any) => m.voiceType === 'Tenor');
-  const basses = activeMembers.filter((m: any) => m.voiceType === 'Bass');
-
-  const alerts: string[] = [];
-  const suggestions: string[] = [];
-  let score = 90;
-
-  if (!keyboardist) {
-    alerts.push("CRITICAL ACTION REQUIRED: No Keyboardist scheduled. Choral guidance is at severe risk.");
-    suggestions.push("Urgent: Contact Member Amal Joseph (M003) or request backup organist from secondary parish list.");
-    score -= 30;
-  } else {
-    suggestions.push(`Keyboardist confirmed: ${keyboardist.firstName} ${keyboardist.lastName} has confirmed attendance.`);
-  }
-
-  if (sopranos.length === 0) {
-    alerts.push("Warning: Soprano register is unstaffed. Lead melodies will be heavy or lacking high-register support.");
-    score -= 15;
-  } else {
-    suggestions.push(`Soprano register is secured by ${sopranos.map(s => s.firstName).join(", ")}.`);
-  }
-
-  if (tenors.length === 0 || basses.length === 0) {
-    alerts.push("Warning: Male harmonic registers (Tenor/Bass) are understaffed.");
-    score -= 10;
-  }
-
-  suggestions.push("Ensure Violin leads counter-melodies during Offertory to fill the high-wind frequency range.");
-  suggestions.push("Prioritize standard a-cappella transition during Communion to let vocal registers resonate naturally.");
-
-  return {
-    balanceScore: Math.max(score, 40),
-    evaluation: "Choir line-up analyzed for liturgical compliance. Overall voice mix is robust but requires attention for missing supporting keys or specific vocal solo segments.",
-    vocalBalanceStatus: `${sopranos.length} Soprano, ${altos.length} Alto, ${tenors.length} Tenor, ${basses.length} Bass scheduled.`,
-    instrumentalStatus: `${keyboardist ? 'Keyboard Active' : 'No Keyboardist'} | Violin/Flute checking.`,
-    suggestedRosterIds: activeMembers.slice(0, 5).map((m: any) => m.id),
-    structuralSuggestions: suggestions,
-    safetyAlerts: alerts
-  };
-}
-
-function getSimulatedContentGen(type: string, details: string, language: string) {
-  const isTamil = language.toLowerCase() === 'ta';
-  
-  if (type === 'birthdayWish') {
-    return {
-      subject: isTamil ? "இனிய கத்தோலிக்க பாடக உறவு பிறந்தநாள் வாழ்த்துகள்!" : "Blessed Birthday Wishes from Choir360!",
-      body: isTamil 
-        ? `அன்பார்ந்த பாடகர் குழு உறுப்பினருக்கு,\n\n"${details || 'எங்கள் குடும்ப உறுப்பினர்'}" ஆகிய உங்களுக்கு, எங்களது புனித தோமையார் பேராலயப் பாடகர் குழு சார்பில் ஆசீர்வதிக்கப்பட்ட பிறந்தநாள் நல்வாழ்த்துகளைக் தெரிவித்துக் கொள்கிறோம்.\n\nஇறைவன் உங்களுக்கு நல்ல சுகத்தையும், தொடர்ந்து பாடிப் புகழும் மேலான குரல் திறனையும் தந்தருளுவாராக! மரியாளின் பரிந்துரை என்றும் உங்களோடு இருக்கட்டும்.`
-        : `Dear Beloved Choir Member,\n\nWe send you our prayerful congratulations on your birthday! Thank you for dedicating your voices and musical talents to glorify God and lead our congregation in prayer.\n\nMay the Lord bless you abundantly, grant you strength, and fill your days with holy joy. Happy Birthday!`,
-      closing: isTamil ? "அன்புடன், தந்தை பங்குத்தந்தை மற்றும் பாடகர் குழு இயக்குனர்" : "In St. Cecilia, Choir Director & Choral Ministry Team"
-    };
-  }
-
-  return {
-    subject: isTamil ? "தேவாலய பாடகர் குழு முக்கிய அறிவிப்பு" : "Important Choral Announcement",
-    body: isTamil
-      ? `அன்பார்ந்த பாடகர்களே,\n\nதயவுசெய்து கவனிக்கவும்: ${details || 'எதிர்வரும் நற்கருணை கொண்டாட்டம் மற்றும் திருப்பலி பயிற்சி.'}\n\nஅனைத்து உறுப்பினர்களும் 30 நிமிடங்களுக்கு முன்பாகவே தங்களுக்குரிய உடைகளுடன் தேவாலய மேடையில் இருக்குமாறு கேட்டுக்கொள்ளப்படுகிறீர்கள்.`
-      : `Dear Choral Members,\n\nKindly note the following: ${details || 'Upcoming Solemn Mass preparations and standard rehearsals'}.\n\nPlease ensure your attendance is marked and you arrive wearing the mandated Parish green/white unified choir uniform.`,
-    closing: "Choir360 Administration Core Team"
-  };
-}
-
-function getSimulatedSmartSearch(query: string, songsList: any[]) {
-  const q = query.toLowerCase().trim();
-  const matched = (songsList || []).filter((song: any) => {
-    const searchable = [
-      song.id,
-      song.title,
-      song.lyricsTitle,
-      song.category,
-      song.album,
-      song.composer,
-      song.singer,
-      song.lyrics,
-      song.lyricsEnglishPattern,
-      song.sourceSearchText,
-    ].filter(Boolean).join("\n").toLowerCase();
-
-    return searchable.includes(q);
-  });
-
-  return {
-    matchedSongIds: matched.map((song: any) => song.id).slice(0, 20),
-    searchMethod: "PDF Songbook Full-Text Search",
-    explanation: matched.length > 0
-      ? `Found ${matched.length} imported PDF song page(s) matching "${query}".`
-      : `No imported PDF song pages found for "${query}".`,
-  };
-}
-
-function startServer() {
-  const PORT = parseInt(process.env.PORT ?? '3001', 10);
-  app.listen(PORT, () => {
-    console.log(`[Choir360 X] Server running on port ${PORT}`);
-    console.log(`[Choir360 X] Firebase Admin: ${admin.apps.length > 0 ? 'Initialized' : 'Not configured (demo mode)'}`);
-    console.log(`[Choir360 X] Gemini AI: ${getGeminiClient() ? 'Ready — gemini-2.0-flash' : 'Not configured (simulated fallback)'}`);
-    void syncCatholicHubOnStartup();
-  });
-}
-
-startServer();
