@@ -3,6 +3,7 @@ import { RadioPlayer } from './RadioPlayer';
 import { Announcement, ChoirEvent, Language, Mass, Member, Payment } from '../types';
 import {
   ArrowUpRight,
+  BookOpen,
   BookOpenText,
   CalendarDays,
   Check,
@@ -207,40 +208,59 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <article className="rounded-3xl border border-slate-200/70 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700">Sunday preparation</p>
-              <h3 className="mt-1 text-xl font-bold text-slate-900">Liturgy music plan</h3>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700">Parish Liturgy Log</p>
+              <h3 className="mt-1 text-xl font-bold text-slate-900">Logged Masses</h3>
             </div>
-            <button onClick={() => onNavigate('song_library')} className="text-xs font-bold text-emerald-700">Open library</button>
+            <button onClick={() => onNavigate('masses')} className="text-xs font-bold text-emerald-700 flex items-center gap-1">
+              Manage <ChevronRight className="h-3.5 w-3.5" />
+            </button>
           </div>
-          <div className="mt-5 divide-y divide-slate-100">
-            {servicePlan.length === 0 && (
+          <div className="mt-4 space-y-2">
+            {masses.length === 0 ? (
               <button
-                onClick={() => onNavigate('song_library')}
+                onClick={() => onNavigate('masses')}
                 className="flex w-full items-center gap-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-left"
               >
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-emerald-700">
-                  <Music2 className="h-5 w-5" />
+                  <BookOpen className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-slate-800">No songs selected yet</p>
-                  <p className="text-xs text-slate-500">Open the Music Library to build the liturgy plan.</p>
+                  <p className="text-sm font-bold text-slate-800">No masses logged yet</p>
+                  <p className="text-xs text-slate-500">Go to Masses & Accounts to log your first liturgy.</p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-slate-300" />
+              </button>
+            ) : (
+              masses.slice(0, 4).map((mass) => {
+                const isSpecial = ['Special Mass', 'Death Mass', 'Death Anniversary Mass'].includes(mass.category);
+                return (
+                  <button
+                    key={mass.id}
+                    onClick={() => onNavigate('masses')}
+                    className="flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 px-4 py-3 text-left hover:bg-slate-100 transition"
+                  >
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isSpecial ? 'bg-amber-100 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                      <BookOpen className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-slate-800">{mass.name}</p>
+                      <p className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5">
+                        <span className={`px-1.5 py-0.5 rounded font-bold uppercase text-[9px] ${isSpecial ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-600'}`}>
+                          {mass.category}
+                        </span>
+                        {mass.date} · {mass.time}
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium shrink-0">{mass.language}</span>
+                  </button>
+                );
+              })
+            )}
+            {masses.length > 4 && (
+              <button onClick={() => onNavigate('masses')} className="w-full py-2 text-xs font-bold text-emerald-700 hover:text-emerald-800 transition text-center">
+                View all {masses.length} masses →
               </button>
             )}
-            {servicePlan.map((song) => (
-              <button key={song.label} onClick={() => onNavigate('song_library')} className="flex w-full items-center gap-4 py-4 text-left">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${song.ready ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                  {song.ready ? <Check className="h-5 w-5" /> : <Music2 className="h-5 w-5" />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{song.label}</p>
-                  <p className="truncate text-sm font-bold text-slate-800">{song.title}</p>
-                  <p className="text-xs text-slate-500">{song.meta}</p>
-                </div>
-                <ChevronRight className="h-4 w-4 text-slate-300" />
-              </button>
-            ))}
           </div>
         </article>
 

@@ -1,24 +1,17 @@
 import React, { useState } from 'react';
-import { Mass, Payment, Member, ShareCalculation, Language } from '../types';
+import { Mass, Payment, Member, Language } from '../types';
 import {
-  BookOpen,
-  Calendar,
-  DollarSign,
-  Briefcase,
-  Layers,
-  Sparkles,
-  Calculator,
-  Lock,
-  Unlock,
-  Bell,
-  ArrowUpRight,
-  Download,
-  CheckCircle,
-  HelpCircle,
-  UserCheck
+  BookOpen, Calculator, Lock, Unlock, Bell,
+  ArrowUpRight, Download, HelpCircle, IndianRupee,
+  CheckCircle2, Clock, AlertCircle,
 } from 'lucide-react';
 import { MULTILINGUAL_DICTIONARY } from '../data/mockData';
-import { formatRegionalCurrency } from '../utils/currency';
+import { formatINR } from '../utils/currency';
+
+const PAYMENT_MASS_TYPES: Mass['category'][] = [
+  'Special Mass', 'Death Mass', 'Death Anniversary Mass',
+];
+const isPaymentMass = (cat: Mass['category']) => PAYMENT_MASS_TYPES.includes(cat);
 
 interface MassManagementProps {
   currentLang: Language;
@@ -35,166 +28,165 @@ export const MassManagement: React.FC<MassManagementProps> = ({
   payments,
   members,
   onAddMass,
-  onUpdatePayment
+  onUpdatePayment,
 }) => {
   const dict = MULTILINGUAL_DICTIONARY[currentLang] || MULTILINGUAL_DICTIONARY.en;
 
-  // Mass Form States
-  const [newMassName, setNewMassName] = useState('');
-  const [newMassCategory, setNewMassCategory] = useState<Mass['category']>('Sunday Mass');
-  const [newMassDate, setNewMassDate] = useState('2026-06-21');
-  const [newMassTime, setNewMassTime] = useState('06:30 AM');
-  const [newMassLang, setNewMassLang] = useState('Tamil');
+  // ── Mass form ──────────────────────────────────────────────────────────────
+  const [massName,     setMassName]     = useState('');
+  const [massCategory, setMassCategory] = useState<Mass['category']>('Sunday Mass');
+  const [massDate,     setMassDate]     = useState(new Date().toISOString().slice(0, 10));
+  const [massTime,     setMassTime]     = useState('06:30 AM');
+  const [massLang,     setMassLang]     = useState('Tamil');
+
+  // Payment fields (only for Special / Death / Death Anniversary)
+  const [partyName,        setPartyName]        = useState('');
+  const [amountProposed,   setAmountProposed]   = useState<number>(0);
+  const [amountReceived,   setAmountReceived]   = useState<boolean>(false);
+  const [receivedAmount,   setReceivedAmount]   = useState<number>(0);
+  const [dateReceived,     setDateReceived]     = useState('');
+  const [whoPaid,          setWhoPaid]          = useState('');
+  const [paymentMode,      setPaymentMode]      = useState('Cash');
+  const [receiptNo,        setReceiptNo]        = useState('');
+  const [paymentRemarks,   setPaymentRemarks]   = useState('');
+
   const [massSuccess, setMassSuccess] = useState('');
 
-  // Share calculation engine active states
-  const [selectedPaymentId, setSelectedPaymentId] = useState<string>(payments[0]?.id || '');
-  const [singerPresentCount, setSingerPresentCount] = useState<number>(6);
-  const [instrumentPresentCount, setInstrumentPresentCount] = useState<number>(2);
-  const [lockedCalculations, setLockedCalculations] = useState<Record<string, {
-    singers: number;
-    instruments: number;
-    totalUnits: number;
-    unitValue: number;
-    singerShare: number;
-    instrumentShare: number;
+  // ── Share calculator ────────────────────────────────────────────────────────
+  const [selectedPaymentId,     setSelectedPaymentId]     = useState<string>(payments[0]?.id || '');
+  const [singerCount,           setSingerCount]           = useState(6);
+  const [instrumentalistCount,  setInstrumentalistCount]  = useState(2);
+  const [lockedCalcs, setLockedCalcs] = useState<Record<string, {
+    singers: number; instruments: number;
+    totalUnits: number; unitValue: number;
+    singerShare: number; instrumentShare: number;
   }>>({});
-  
-  // Notification logs simulation
-  const [notifLogged, setNotifLogged] = useState<string | null>(null);
+  const [notifMsg, setNotifMsg] = useState<string | null>(null);
 
+  // ── Derived ─────────────────────────────────────────────────────────────────
+  const activePayment = payments.find((p) => p.id === selectedPaymentId) || payments[0];
+  const isLocked      = activePayment ? !!lockedCalcs[activePayment.id] : false;
+
+  const calcEngine = (amount: number) => {
+    const totalUnits  = singerCount * 1 + instrumentalistCount * 2;
+    const unitValue   = totalUnits > 0 ? amount / totalUnits : 0;
+    return {
+      totalUnits,
+      unitValue:         Math.round(unitValue),
+      singerShare:       Math.round(unitValue),
+      instrumentalistShare: Math.round(unitValue * 2),
+    };
+  };
+
+  const calc = calcEngine(activePayment?.promisedAmount || 0);
+
+  const paymentStatus = (proposed: number, received: boolean, recvAmt: number): 'Pending' | 'Received' => {
+    if (!received) return 'Pending';
+    return recvAmt >= proposed ? 'Received' : 'Pending';
+  };
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
   const handleAddMass = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMassName) return;
+    if (!massName) return;
 
-    const added: Mass = {
-      id: `MS${String(masses.length + 1).padStart(3, '0')}`,
-      name: newMassName,
-      category: newMassCategory,
-      date: newMassDate,
-      time: newMassTime,
-      language: newMassLang
-    };
+    const id = `MS${String(masses.length + 1).padStart(3, '0')}`;
+    const newMass: Mass = { id, name: massName, category: massCategory, date: massDate, time: massTime, language: massLang };
+    onAddMass(newMass);
 
-    onAddMass(added);
-    setNewMassName('');
-    setMassSuccess(`Successfully created liturgy ${added.name}`);
+    // If a payment mass, create payment record too
+    if (isPaymentMass(massCategory) && partyName && amountProposed > 0) {
+      const status = paymentStatus(amountProposed, amountReceived, receivedAmount);
+      const recvAmt = amountReceived ? receivedAmount : 0;
+      const pending = Math.max(amountProposed - recvAmt, 0);
+      const pid = `PAY${String(payments.length + 1).padStart(3, '0')}`;
+      onUpdatePayment(pid, recvAmt, status);
+    }
+
+    setMassName('');
+    setPartyName('');
+    setAmountProposed(0);
+    setAmountReceived(false);
+    setReceivedAmount(0);
+    setDateReceived('');
+    setWhoPaid('');
+    setPaymentMode('Cash');
+    setReceiptNo('');
+    setPaymentRemarks('');
+    setMassSuccess(`✓ Logged: ${massName}`);
     setTimeout(() => setMassSuccess(''), 4000);
   };
 
-  // Find active selected payment definition
-  const activePayment = payments.find(p => p.id === selectedPaymentId) || payments[0];
-
-  // Engine Math Calculation
-  const calculateEngine = (totalAmount: number) => {
-    const totalUnits = (singerPresentCount * 1) + (instrumentPresentCount * 2);
-    const unitValue = totalUnits > 0 ? (totalAmount / totalUnits) : 0;
-    const singerShare = Math.round(unitValue * 1);
-    const instrumentalistShare = Math.round(unitValue * 2);
-
-    return {
-      totalUnits,
-      unitValue: Math.round(unitValue),
-      singerShare,
-      instrumentalistShare
-    };
+  const handleLock = () => {
+    if (!activePayment) return;
+    setLockedCalcs({ ...lockedCalcs, [activePayment.id]: {
+      singers: singerCount, instruments: instrumentalistCount,
+      totalUnits: calc.totalUnits, unitValue: calc.unitValue,
+      singerShare: calc.singerShare, instrumentShare: calc.instrumentalistShare,
+    }});
+    onUpdatePayment(activePayment.id, activePayment.receivedAmount || activePayment.promisedAmount, 'Received');
+    alert(`Settlement locked for ${activePayment.partyName}.\nTotal distributed: ${formatINR(activePayment.promisedAmount)}`);
   };
 
-  const currentCalc = calculateEngine(activePayment?.promisedAmount || 6000);
-
-  // Trigger locked index
-  const handleLockCalculation = () => {
+  const handleUnlock = () => {
     if (!activePayment) return;
-    setLockedCalculations({
-      ...lockedCalculations,
-      [activePayment.id]: {
-        singers: singerPresentCount,
-        instruments: instrumentPresentCount,
-        totalUnits: currentCalc.totalUnits,
-        unitValue: currentCalc.unitValue,
-        singerShare: currentCalc.singerShare,
-        instrumentShare: currentCalc.instrumentalistShare
-      }
-    });
-
-    onUpdatePayment(activePayment.id, activePayment.promisedAmount, 'Received');
-    alert(`Calculation Engine status: LOCKED! Accounts for ${activePayment.partyName} are completed. Total distributed share is ${formatRegionalCurrency(activePayment.promisedAmount)}`);
-  };
-
-  const handleUnlockCalculation = () => {
-    if (!activePayment) return;
-    const copy = { ...lockedCalculations };
+    const copy = { ...lockedCalcs };
     delete copy[activePayment.id];
-    setLockedCalculations(copy);
+    setLockedCalcs(copy);
   };
 
-  const isCurrentLocked = activePayment ? !!lockedCalculations[activePayment.id] : false;
-
-  // Notification simulation
-  const triggerOverdueReminder = (p: Payment) => {
-    setNotifLogged(`Reminder alert sent successfully to "${p.partyName}" (${p.mobile})! Enforcing due payments for ${p.massType} on channels: [WhatsApp, Email, SMS]`);
-    setTimeout(() => setNotifLogged(null), 7000);
+  const sendReminder = (p: Payment) => {
+    setNotifMsg(`Reminder sent to "${p.partyName}" (${p.mobile}) for ${p.massType} — pending ${formatINR(p.pendingAmount)}`);
+    setTimeout(() => setNotifMsg(null), 6000);
   };
+
+  const specialMasses = masses.filter((m) => isPaymentMass(m.category));
 
   return (
-    <div className="space-y-8" id="mass-management-component">
-      {/* 1. Header */}
-      <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 pb-3 gap-3">
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-200 pb-3 gap-3">
         <div>
-          <h2 className="font-sans font-bold text-xl text-slate-800">Parish Masses & Accounts Desk</h2>
-          <p className="text-xs text-slate-500">Log traditional parish liturgical rites and invoke our automated choral split calculations.</p>
+          <h2 className="font-bold text-xl text-slate-800">Parish Masses & Accounts Desk</h2>
+          <p className="text-xs text-slate-500">Log liturgical rites and manage choral split calculations.</p>
         </div>
         <div className="flex items-center gap-1 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 font-bold text-xs text-emerald-800">
-          <Calculator className="w-3.5 h-3.5" /> Singer Weight: 1 • Instrumentalist Weight: 2
+          <Calculator className="w-3.5 h-3.5" /> Singer Weight: 1 · Instrumentalist Weight: 2
         </div>
       </div>
 
-      {notifLogged && (
-        <div className="bg-amber-50 text-amber-800 p-4 rounded-xl border border-amber-200 text-xs font-semibold flex items-center justify-between gap-2" id="notif-toast">
-          <div className="flex items-center gap-2">
-            <Bell className="w-5 h-5 text-amber-600 animate-swing" />
-            <span>{notifLogged}</span>
-          </div>
-          <span className="text-[9px] bg-amber-200 text-amber-900 border border-amber-300 font-mono px-2 py-0.5 rounded-full">SENT</span>
+      {notifMsg && (
+        <div className="bg-amber-50 text-amber-800 p-4 rounded-xl border border-amber-200 text-xs font-semibold flex items-center gap-2">
+          <Bell className="w-4 h-4 text-amber-600 shrink-0" />
+          {notifMsg}
         </div>
       )}
 
-      {/* 2. Top columns: Mass registration & Collection database */}
+      {/* Form + Payments table */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Create liturgy form */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4" id="liturgy-creator-panel">
-          <h3 className="font-sans font-bold text-slate-900 text-sm flex items-center gap-1.5 pb-2 border-b border-slate-100">
-            <BookOpen className="w-4 h-4 text-emerald-600" />
-            Setup Upcoming Liturgies
+
+        {/* ── Mass Form ── */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-1.5 pb-2 border-b border-slate-100">
+            <BookOpen className="w-4 h-4 text-emerald-600" /> Setup Upcoming Liturgies
           </h3>
 
           {massSuccess && (
-            <p className="text-xs p-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-medium">
-              {massSuccess}
-            </p>
+            <p className="text-xs p-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-medium">{massSuccess}</p>
           )}
 
-          <form onSubmit={handleAddMass} className="space-y-4 text-xs" id="mass-form">
+          <form onSubmit={handleAddMass} className="space-y-3 text-xs">
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase">Mass Name / Description</label>
-              <input
-                type="text"
-                required
-                value={newMassName}
-                onChange={e => setNewMassName(e.target.value)}
+              <input required value={massName} onChange={(e) => setMassName(e.target.value)}
                 placeholder="e.g. Wedding Solemn Mass of Dr. Joseph"
-                className="w-full px-3 py-3 min-h-[44px] rounded-lg border border-slate-200"
-              />
+                className="w-full px-3 py-2.5 min-h-[44px] rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400" />
             </div>
 
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase">Liturgical Rite Category</label>
-              <select
-                value={newMassCategory}
-                onChange={e => setNewMassCategory(e.target.value as Mass['category'])}
-                className="w-full px-3 py-3 min-h-[44px] rounded-lg border border-slate-200"
-              >
+              <select value={massCategory} onChange={(e) => setMassCategory(e.target.value as Mass['category'])}
+                className="w-full px-3 py-2.5 min-h-[44px] rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
                 <option value="Sunday Mass">Sunday Mass (Communal)</option>
                 <option value="Weekday Mass">Regular Weekday Mass</option>
                 <option value="Special Mass">Special Mass (Marriage, Feast, Ordination)</option>
@@ -206,99 +198,191 @@ export const MassManagement: React.FC<MassManagementProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-slate-400 uppercase">Date</label>
-                <input type="date" value={newMassDate} onChange={e => setNewMassDate(e.target.value)} className="w-full px-3 py-3 min-h-[44px] border border-slate-200 rounded" />
+                <input type="date" value={massDate} onChange={(e) => setMassDate(e.target.value)}
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-400" />
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-slate-400 uppercase">Start Time</label>
-                <input type="text" value={newMassTime} onChange={e => setNewMassTime(e.target.value)} placeholder="e.g. 06:30 AM" className="w-full px-3 py-3 min-h-[44px] border border-slate-200 rounded" />
+                <input value={massTime} onChange={(e) => setMassTime(e.target.value)} placeholder="06:30 AM"
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-400" />
               </div>
             </div>
 
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase">Principal Language</label>
-              <select value={newMassLang} onChange={e => setNewMassLang(e.target.value)} className="w-full px-3 py-3 min-h-[44px] border border-slate-200 rounded">
-                <option>Tamil</option>
-                <option>English</option>
-                <option>Malayalam</option>
-                <option>Telugu</option>
-                <option>Hindi</option>
+              <select value={massLang} onChange={(e) => setMassLang(e.target.value)}
+                className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                {['Tamil','English','Malayalam','Telugu','Hindi'].map((l) => <option key={l}>{l}</option>)}
               </select>
             </div>
 
-            <button
-              type="submit"
-              id="submit-mass-btn"
-              className="w-full py-3 min-h-[44px] bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1 cursor-pointer transition shadow"
-            >
+            {/* ── Special Mass Payment Fields ── */}
+            {isPaymentMass(massCategory) && (
+              <div className="space-y-3 border-t border-amber-100 pt-3 mt-2">
+                <p className="text-[10px] font-bold text-amber-700 uppercase flex items-center gap-1">
+                  <IndianRupee className="w-3 h-3" /> Payment Details
+                </p>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Sponsor / Party Name</label>
+                  <input value={partyName} onChange={(e) => setPartyName(e.target.value)} placeholder="e.g. Joseph Family"
+                    className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Amount Proposed (₹)</label>
+                  <input type="number" min={0} value={amountProposed || ''} onChange={(e) => setAmountProposed(Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Amount Received?</label>
+                  <div className="flex gap-2">
+                    {[true, false].map((v) => (
+                      <button key={String(v)} type="button"
+                        onClick={() => setAmountReceived(v)}
+                        className={`flex-1 py-2 rounded-lg border text-xs font-bold transition ${amountReceived === v
+                          ? v ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-rose-100 text-rose-700 border-rose-300'
+                          : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                        {v ? 'Yes' : 'No'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {amountReceived && (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">Amount Received (₹)</label>
+                      <input type="number" min={0} value={receivedAmount || ''} onChange={(e) => setReceivedAmount(Number(e.target.value))}
+                        className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-400" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">Date Received</label>
+                        <input type="date" value={dateReceived} onChange={(e) => setDateReceived(e.target.value)}
+                          className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-400" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">Payment Mode</label>
+                        <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}
+                          className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                          {['Cash','UPI','Bank Transfer','Cheque','DD'].map((m) => <option key={m}>{m}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">Who Paid</label>
+                      <input value={whoPaid} onChange={(e) => setWhoPaid(e.target.value)} placeholder="Payer name"
+                        className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-400" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">Receipt No. (optional)</label>
+                      <input value={receiptNo} onChange={(e) => setReceiptNo(e.target.value)}
+                        className="w-full px-3 py-2.5 min-h-[44px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-400" />
+                    </div>
+                  </>
+                )}
+
+                {/* Payment status preview */}
+                <div className={`text-[10px] font-bold px-3 py-1.5 rounded-lg ${
+                  !amountReceived ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                  : receivedAmount >= amountProposed ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : 'bg-orange-50 text-orange-800 border border-orange-200'
+                }`}>
+                  Status:{' '}
+                  {!amountReceived ? 'Pending'
+                    : receivedAmount >= amountProposed ? 'Received (Full)'
+                    : `Partial — ${formatINR(Math.max(amountProposed - receivedAmount, 0))} pending`}
+                </div>
+              </div>
+            )}
+
+            <button type="submit"
+              className="w-full py-3 min-h-[44px] bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition">
               Log Liturgy Mass
             </button>
           </form>
         </div>
 
-        {/* Collections Ledger Dashboard */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4" id="collections-dashboard-panel">
-          <h3 className="font-sans font-bold text-slate-900 text-sm flex items-center gap-1.5 pb-2 border-b border-slate-100">
-            <DollarSign className="w-4 h-4 text-emerald-600" />
-            Special Mass Payments Database
+        {/* ── Special Mass Payments Table ── */}
+        <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-1.5 pb-2 border-b border-slate-100">
+            <IndianRupee className="w-4 h-4 text-emerald-600" /> Special Mass Payments Database
           </h3>
 
+          {/* All logged masses summary */}
+          {masses.length > 0 && (
+            <div className="mb-2">
+              <p className="text-[10px] text-slate-400 uppercase font-bold mb-2">All Logged Masses ({masses.length})</p>
+              <div className="flex flex-wrap gap-2">
+                {masses.map((m) => (
+                  <span key={m.id} className={`px-2 py-1 rounded-lg text-[10px] font-semibold border ${
+                    isPaymentMass(m.category) ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-slate-50 text-slate-600 border-slate-200'
+                  }`}>
+                    {m.name} · {m.date}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px] text-left" id="payments-table">
+            <table className="w-full min-w-[560px] text-left">
               <thead>
                 <tr className="border-b border-slate-100 text-[10px] text-slate-400 font-bold uppercase">
                   <th className="py-2.5">Sponsor / Party</th>
-                  <th className="py-2.5">Solemn Rite Rites</th>
-                  <th className="py-2.5 text-right">Promised</th>
+                  <th className="py-2.5">Solemn Rite</th>
+                  <th className="py-2.5 text-right">Proposed</th>
                   <th className="py-2.5 text-right">Pending</th>
-                  <th className="py-2.5 text-center">Receipts Mode</th>
-                  <th className="py-2.5 text-right">Invoice Reminder</th>
+                  <th className="py-2.5 text-center">Status</th>
+                  <th className="py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 text-xs">
-                {payments.map((p) => {
-                  const hasPending = p.pendingAmount > 0;
-                  const isLocked = !!lockedCalculations[p.id];
+                {payments.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-400 text-sm">
+                      No special mass payments logged yet. Select Special Mass / Death Mass above to add one.
+                    </td>
+                  </tr>
+                ) : payments.map((p) => {
+                  const locked  = !!lockedCalcs[p.id];
+                  const pending = locked ? 0 : p.pendingAmount;
+                  const received = p.status === 'Received' || locked;
                   return (
-                    <tr key={p.id} className="hover:bg-slate-50/50 transition">
-                      <td className="py-3.5">
+                    <tr key={p.id} className="hover:bg-slate-50 transition">
+                      <td className="py-3">
                         <p className="font-bold text-slate-800">{p.partyName}</p>
                         <p className="text-[10px] text-slate-400 font-mono">{p.mobile}</p>
                       </td>
-                      <td className="py-3.5">
+                      <td className="py-3">
                         <p className="font-semibold text-slate-700">{p.massType}</p>
-                        <p className="text-[10px] text-slate-400 font-mono">{p.massDate} at {p.massTime}</p>
+                        <p className="text-[10px] text-slate-400">{p.massDate} · {p.massTime}</p>
                       </td>
-                      <td className="py-3.5 text-right font-bold font-mono">{formatRegionalCurrency(p.promisedAmount)}</td>
-                      <td className={`py-3.5 text-right font-bold font-mono ${hasPending ? 'text-rose-600' : 'text-slate-400'}`}>
-                        {formatRegionalCurrency(isLocked ? 0 : p.pendingAmount)}
+                      <td className="py-3 text-right font-bold font-mono">{formatINR(p.promisedAmount)}</td>
+                      <td className={`py-3 text-right font-bold font-mono ${pending > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                        {formatINR(pending)}
                       </td>
-                      <td className="py-3.5 text-center">
+                      <td className="py-3 text-center">
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${
-                          isLocked || p.status === 'Received'
-                            ? 'bg-emerald-50 text-emerald-800 border-emerald-100'
-                            : 'bg-amber-50 text-amber-800 border-amber-100'
+                          received ? 'bg-emerald-50 text-emerald-800 border-emerald-100' : 'bg-amber-50 text-amber-800 border-amber-100'
                         }`}>
-                          {isLocked || p.status === 'Received' ? 'Received & Cleared' : 'Unresolved'}
+                          {received ? 'Received' : 'Pending'}
                         </span>
                       </td>
-                      <td className="py-3.5">
+                      <td className="py-3">
                         <div className="flex items-center justify-end gap-1.5">
-                          {hasPending && !isLocked && (
-                            <button
-                              onClick={() => triggerOverdueReminder(p)}
-                              className="p-1 text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded cursor-pointer transition flex items-center gap-0.5 text-[9px] font-bold"
-                            >
+                          {!received && (
+                            <button onClick={() => sendReminder(p)}
+                              className="p-1 text-amber-700 hover:text-amber-900 bg-amber-50 border border-amber-200 rounded text-[9px] font-bold flex items-center gap-0.5 transition">
                               <Bell className="w-3 h-3" /> Remind
                             </button>
                           )}
-                          <button
-                            onClick={() => setSelectedPaymentId(p.id)}
-                            className={`p-1.5 rounded cursor-pointer transition flex items-center gap-1 text-[10px] font-bold ${
-                              selectedPaymentId === p.id
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                            }`}
-                          >
+                          <button onClick={() => setSelectedPaymentId(p.id)}
+                            className={`p-1.5 rounded text-[10px] font-bold flex items-center gap-1 transition ${
+                              selectedPaymentId === p.id ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                             Calculate <ArrowUpRight className="w-3 h-3" />
                           </button>
                         </div>
@@ -312,159 +396,156 @@ export const MassManagement: React.FC<MassManagementProps> = ({
         </div>
       </div>
 
-      {/* 3. AUTOMATIC SHARE CALCULATION ENGINE */}
+      {/* ── Share Calculation Engine ── */}
       {activePayment && (
-        <div className="bg-slate-900 text-slate-100 p-6 md:p-8 rounded-3xl border border-slate-800 shadow-xl space-y-6" id="choral-calculator-engine">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-slate-805 pb-4 gap-4">
+        <div className="bg-slate-900 text-slate-100 p-6 md:p-8 rounded-3xl border border-slate-800 shadow-xl space-y-6">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-slate-700 pb-4 gap-4">
             <div className="flex items-center gap-3">
               <div className="bg-emerald-950 border border-emerald-800 text-emerald-400 p-2 rounded-xl">
                 <Calculator className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-sans font-bold text-md text-white flex items-center gap-2">
+                <h3 className="font-bold text-white flex items-center gap-2">
                   Share Calculation Engine
-                  <span className="text-[10px] font-mono tracking-wider bg-slate-800 border border-slate-700 px-2 py-0.5 rounded-full font-bold uppercase text-amber-400">
-                    {isCurrentLocked ? 'CALCULATIONS LOCKED' : 'LIVE CALCULATOR'}
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase ${
+                    isLocked ? 'bg-emerald-900 text-emerald-300' : 'bg-slate-800 text-amber-400'}`}>
+                    {isLocked ? 'LOCKED' : 'LIVE'}
                   </span>
                 </h3>
-                <p className="text-xs text-slate-400 leading-normal">
-                  Settle choral earnings for requested liturgy: <strong className="text-slate-200">{activePayment.massType}</strong>, sponsored by {activePayment.partyName}.
+                <p className="text-xs text-slate-400">
+                  {activePayment.massType} · Sponsor: <strong className="text-slate-200">{activePayment.partyName}</strong>
                 </p>
               </div>
             </div>
-
-            <div className="flex items-center gap-2">
-              {isCurrentLocked ? (
-                <button
-                  onClick={handleUnlockCalculation}
-                  className="px-4 py-3 min-h-[44px] bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer transition"
-                >
+            <div>
+              {isLocked ? (
+                <button onClick={handleUnlock}
+                  className="px-4 py-2.5 min-h-[44px] bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition">
                   <Unlock className="w-4 h-4" /> Unlock Editing
                 </button>
               ) : (
-                <button
-                  onClick={handleLockCalculation}
-                  className="px-4 py-3 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer transition shadow"
-                >
-                  <Lock className="w-4 h-4" /> Lock Calculation & Disburse
+                <button onClick={handleLock}
+                  className="px-4 py-2.5 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition">
+                  <Lock className="w-4 h-4" /> Lock & Disburse
                 </button>
               )}
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            
-            {/* Left Controls: set counts */}
+            {/* Controls */}
             <div className="space-y-4">
-              <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono">Present Attendees Parameters</h4>
-              
+              <h4 className="text-xs font-bold text-emerald-400 uppercase font-mono">Attendance Parameters</h4>
+              {[
+                { label: 'Present Singers (Weight = 1)', val: singerCount, set: setSingerCount, max: 20 },
+                { label: 'Present Instrumentalists (Weight = 2)', val: instrumentalistCount, set: setInstrumentalistCount, max: 10 },
+              ].map(({ label, val, set, max }) => (
+                <div key={label} className="bg-slate-800 p-3.5 rounded-xl border border-slate-700 space-y-2">
+                  <div className="flex justify-between text-xs text-slate-300">
+                    <span>{label}</span>
+                    <span className="font-mono font-bold text-white text-sm">{val}</span>
+                  </div>
+                  <input type="range" min={0} max={max} value={val} disabled={isLocked}
+                    onChange={(e) => set(Number(e.target.value))}
+                    className="w-full accent-emerald-500 disabled:opacity-40" />
+                </div>
+              ))}
+            </div>
+
+            {/* Summary */}
+            <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 flex flex-col justify-between">
+              <h4 className="text-xs font-bold text-emerald-400 uppercase font-mono mb-4">Choral Split Summary</h4>
               <div className="space-y-3 text-xs">
-                <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-800 space-y-1">
-                  <div className="flex justify-between items-center text-slate-300">
-                    <span>Present Singers Count (Weight = 1)</span>
-                    <span className="font-mono font-bold text-white text-md">{singerPresentCount}</span>
+                {[
+                  { label: 'Gross Amount',    val: formatINR(activePayment.promisedAmount), cls: 'text-white' },
+                  { label: 'Total Units',     val: `${isLocked ? lockedCalcs[activePayment.id]?.totalUnits : calc.totalUnits} units`, cls: 'text-slate-200' },
+                  { label: 'Unit Value',      val: formatINR(isLocked ? lockedCalcs[activePayment.id]?.unitValue : calc.unitValue), cls: 'text-emerald-400 text-sm font-extrabold' },
+                ].map(({ label, val, cls }) => (
+                  <div key={label} className="flex justify-between border-b border-slate-700 pb-2">
+                    <span className="text-slate-400">{label}</span>
+                    <span className={`font-bold font-mono ${cls}`}>{val}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="15"
-                    disabled={isCurrentLocked}
-                    value={singerPresentCount}
-                    onChange={e => setSingerPresentCount(Number(e.target.value))}
-                    className="w-full accent-emerald-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  />
-                </div>
-
-                <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-800 space-y-1">
-                  <div className="flex justify-between items-center text-slate-300">
-                    <span>Present Instrumentalists (Weight = 2)</span>
-                    <span className="font-mono font-bold text-white text-md">{instrumentPresentCount}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="6"
-                    disabled={isCurrentLocked}
-                    value={instrumentPresentCount}
-                    onChange={e => setInstrumentPresentCount(Number(e.target.value))}
-                    className="w-full accent-emerald-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  />
-                </div>
+                ))}
               </div>
-
-              <div className="p-3 bg-slate-800/30 rounded-xl border border-slate-800 text-[10px] text-slate-400 leading-relaxed font-sans">
-                <strong>Dynamic Roster Balance:</strong> If <strong>Amal (Keyboardist)</strong> and <strong>Kevin (Flute)</strong> are checked in, they consume 2 weights each (4 units).
-              </div>
+              <p className="text-[10px] text-emerald-300/70 font-mono mt-4 bg-emerald-950 p-2 rounded">
+                {formatINR(activePayment.promisedAmount)} / ({singerCount}×1 + {instrumentalistCount}×2)
+              </p>
             </div>
 
-            {/* Middle panel: Big Math Calculations readout */}
-            <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-800 flex flex-col justify-between" id="math-display-panel">
-              <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono mb-3">Choral Split Summary</h4>
-              
-              <div className="space-y-4 font-sans text-xs">
-                <div className="flex justify-between border-b border-slate-700/50 pb-2">
-                  <span className="text-slate-400">Gross Promised Amount</span>
-                  <span className="font-bold text-white font-mono text-sm">{formatRegionalCurrency(activePayment.promisedAmount)}</span>
-                </div>
-                
-                <div className="flex justify-between border-b border-slate-700/50 pb-2">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    Choral Unit Weight
-                    <HelpCircle className="w-3.5 h-3.5 text-slate-500 shrink-0" title="Calculated as (Singers * 1) + (Instrumentalists * 2)" />
-                  </span>
-                  <span className="font-bold text-slate-200 font-mono">
-                    {isCurrentLocked ? lockedCalculations[activePayment.id]?.totalUnits : currentCalc.totalUnits} Units
-                  </span>
-                </div>
-
-                <div className="flex justify-between border-b border-slate-700/50 pb-2">
-                  <span className="text-slate-400">Unit Weight Cash Value</span>
-                  <span className="font-extrabold text-emerald-400 font-mono text-sm">
-                    {formatRegionalCurrency(isCurrentLocked ? lockedCalculations[activePayment.id]?.unitValue : currentCalc.unitValue)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="bg-emerald-950/40 p-3 rounded-lg border border-emerald-900/60 text-[10px] text-emerald-300/80 leading-normal font-mono mt-4">
-                Formula: {formatRegionalCurrency(activePayment.promisedAmount)} / (({isCurrentLocked ? lockedCalculations[activePayment.id]?.singers : singerPresentCount} Singers × 1) + ({isCurrentLocked ? lockedCalculations[activePayment.id]?.instruments : instrumentPresentCount} Instrumentalists × 2))
-              </div>
-            </div>
-
-            {/* Right Display: Big visual Cards for shares */}
+            {/* Per-member shares */}
             <div className="space-y-4">
-              <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono">Personal Disbursement Shares</h4>
-
-              <div className="grid grid-cols-2 gap-3" id="disbursement-shares-visual">
-                {/* Singer Share Card */}
+              <h4 className="text-xs font-bold text-emerald-400 uppercase font-mono">Disbursement Shares</h4>
+              <div className="grid grid-cols-2 gap-3">
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center space-y-1">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Per Singer</p>
-                  <p className="text-lg font-extrabold text-white font-mono">
-                    {formatRegionalCurrency(isCurrentLocked ? lockedCalculations[activePayment.id]?.singerShare : currentCalc.singerShare)}
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">Per Singer</p>
+                  <p className="text-xl font-extrabold text-white font-mono">
+                    {formatINR(isLocked ? lockedCalcs[activePayment.id]?.singerShare : calc.singerShare)}
                   </p>
-                  <p className="text-[9px] text-emerald-500">Weight Factor: 1x</p>
+                  <p className="text-[9px] text-emerald-400">Weight 1×</p>
                 </div>
-
-                {/* Instrumentalist Share Card */}
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center space-y-1">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Per Musician</p>
-                  <p className="text-lg font-extrabold text-yellow-400 font-mono">
-                    {formatRegionalCurrency(isCurrentLocked ? lockedCalculations[activePayment.id]?.instrumentShare : currentCalc.instrumentalistShare)}
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">Per Musician</p>
+                  <p className="text-xl font-extrabold text-amber-400 font-mono">
+                    {formatINR(isLocked ? lockedCalcs[activePayment.id]?.instrumentShare : calc.instrumentalistShare)}
                   </p>
-                  <p className="text-[9px] text-yellow-500">Weight Factor: 2x</p>
+                  <p className="text-[9px] text-amber-400">Weight 2×</p>
                 </div>
               </div>
 
-              {/* PDF Preview trigger */}
+              {/* Total distributed */}
+              <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 text-xs text-center">
+                <p className="text-slate-400">Total distributed</p>
+                <p className="text-lg font-extrabold text-emerald-400 font-mono">
+                  {formatINR(
+                    (isLocked ? lockedCalcs[activePayment.id]?.singerShare : calc.singerShare) * singerCount +
+                    (isLocked ? lockedCalcs[activePayment.id]?.instrumentShare : calc.instrumentalistShare) * instrumentalistCount
+                  )}
+                </p>
+              </div>
+
               <button
-                onClick={() => {
-                  alert(`Generating Diocesan Standard Financial Audit for ${activePayment.partyName}...\n\nSponsors Offering: ${formatRegionalCurrency(activePayment.promisedAmount)}\nDisbursed to: ${singerPresentCount} Singers, ${instrumentPresentCount} Instrumentalists.\n\nApproved securely via Choir360 financial ledger module!`);
-                }}
-                className="w-full py-3 min-h-[44px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border border-slate-700 transition"
-              >
-                <Download className="w-3.5 h-3.5" /> Export Audit Report (Print/PDF)
+                onClick={() => alert(`Audit for ${activePayment.partyName}\nProposed: ${formatINR(activePayment.promisedAmount)}\nSingers (${singerCount}): ${formatINR(calc.singerShare)} each\nInstrumentalists (${instrumentalistCount}): ${formatINR(calc.instrumentalistShare)} each`)}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 border border-slate-700 transition">
+                <Download className="w-3.5 h-3.5" /> Export Audit Report
               </button>
             </div>
+          </div>
+        </div>
+      )}
 
+      {/* Logged masses list */}
+      {masses.length > 0 && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <h3 className="font-bold text-slate-900 text-sm pb-3 border-b border-slate-100 mb-4">
+            All Logged Liturgies
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead>
+                <tr className="text-[10px] text-slate-400 font-bold uppercase border-b border-slate-100">
+                  <th className="pb-2">Name</th>
+                  <th className="pb-2">Category</th>
+                  <th className="pb-2">Date</th>
+                  <th className="pb-2">Time</th>
+                  <th className="pb-2">Language</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {masses.map((m) => (
+                  <tr key={m.id} className="hover:bg-slate-50">
+                    <td className="py-2.5 font-semibold text-slate-800">{m.name}</td>
+                    <td className="py-2.5">
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                        isPaymentMass(m.category) ? 'bg-amber-50 text-amber-800 border border-amber-100' : 'bg-slate-100 text-slate-600'
+                      }`}>{m.category}</span>
+                    </td>
+                    <td className="py-2.5 font-mono text-slate-500">{m.date}</td>
+                    <td className="py-2.5 text-slate-500">{m.time}</td>
+                    <td className="py-2.5 text-slate-500">{m.language}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

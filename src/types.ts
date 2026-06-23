@@ -55,7 +55,7 @@ export type VoiceType = 'Soprano' | 'Alto' | 'Tenor' | 'Bass' | 'None';
 
 export type MemberType = 'Singer' | 'Keyboard' | 'Guitar' | 'Violin' | 'Flute' | 'Tabla' | 'Pad' | 'Drums' | 'Other';
 
-export type MemberStatus = 'Pending' | 'Correction Requested' | 'Approved' | 'Active Member';
+export type MemberStatus = 'Pending' | 'Correction Requested' | 'Approved' | 'Active Member' | 'Rejected' | 'Admin';
 
 export interface Member {
   id: string;
