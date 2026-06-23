@@ -1,6 +1,7 @@
+import { signInAnonymously } from 'firebase/auth';
 import { CloudinaryMediaRecord } from '../types';
 import { createRecordMetadata } from './recordMetadata';
-import { upsertTenantRecord } from './firebase';
+import { auth, upsertTenantRecord } from './firebase';
 import { apiFetch } from './apiClient';
 
 interface CloudinaryUploadContext {
@@ -86,6 +87,12 @@ export async function uploadMediaToCloudinary(
   }
 
   await validateMediaFile(file);
+
+  // The signature endpoint requires a Firebase ID token. Public registration
+  // users are not logged in, so sign them in anonymously to obtain one.
+  if (auth && !auth.currentUser) {
+    await signInAnonymously(auth);
+  }
 
   const signatureResponse = await apiFetch('/api/cloudinary/signature', {
     method: 'POST',
