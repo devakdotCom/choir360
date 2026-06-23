@@ -405,7 +405,10 @@ export const CatholicKnowledgeHub: React.FC = () => {
 
   const filteredSongs = useMemo(() => {
     const queryParts = expandHubSearchQuery(songSearch);
+    const seen = new Set<string>();
     return songs.filter((song) => {
+      if (seen.has(song.id)) return false;
+      seen.add(song.id);
       if (songCategory !== 'all' && song.category !== songCategory) return false;
       if (queryParts.length === 0) return true;
       const haystack = normalizeHubSearch([
@@ -417,6 +420,17 @@ export const CatholicKnowledgeHub: React.FC = () => {
       return queryParts.some((part) => haystack.includes(part));
     });
   }, [songs, songCategory, songSearch]);
+
+  // Group filtered songs by category for the index panel
+  const groupedSongs = useMemo(() => {
+    const map = new Map<string, { label: string; songs: CatholicHubSong[] }>();
+    for (const song of filteredSongs) {
+      const key = song.category || 'other';
+      if (!map.has(key)) map.set(key, { label: song.categoryTamil || key, songs: [] });
+      map.get(key)!.songs.push(song);
+    }
+    return Array.from(map.values());
+  }, [filteredSongs]);
 
   const selectedSong = songs.find((song) => song.id === selectedSongId) || filteredSongs[0] || songs[0];
   const selectedStatus = songSyncStatus.find((status) => status.categoryId === songCategory)
@@ -619,16 +633,23 @@ export const CatholicKnowledgeHub: React.FC = () => {
                         ))}
                       </div>
                     ) : (
-                      filteredSongs.map((song) => (
-                        <button
-                          key={song.id}
-                          type="button"
-                          onClick={() => selectSong(song, window.matchMedia('(max-width: 767px)').matches)}
-                          className={`w-full rounded-xl p-3 text-left transition ${selectedSong?.id === song.id ? 'bg-amber-50 ring-1 ring-amber-200' : 'hover:bg-slate-50'}`}
-                        >
-                          <p className="line-clamp-2 text-sm font-black text-slate-900">{song.title}</p>
-                          <p className="mt-1 text-[11px] font-semibold text-slate-500">{song.categoryTamil} · #{song.order}</p>
-                        </button>
+                      groupedSongs.map(({ label, songs: groupSongs }) => (
+                        <div key={label}>
+                          <div className="sticky top-0 z-10 bg-white px-2 pb-1 pt-2">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">{label}</p>
+                          </div>
+                          {groupSongs.map((song) => (
+                            <button
+                              key={song.id}
+                              type="button"
+                              onClick={() => selectSong(song, window.matchMedia('(max-width: 767px)').matches)}
+                              className={`w-full rounded-xl p-3 text-left transition ${selectedSong?.id === song.id ? 'bg-amber-50 ring-1 ring-amber-200' : 'hover:bg-slate-50'}`}
+                            >
+                              <p className="line-clamp-2 text-sm font-black text-slate-900">{song.title}</p>
+                              <p className="mt-1 text-[11px] font-semibold text-slate-400">#{song.order}</p>
+                            </button>
+                          ))}
+                        </div>
                       ))
                     )}
                   </div>
