@@ -378,9 +378,17 @@ export default function App() {
           />
 
           <div className="mt-4">
-            <AuthPanel user={authState.user} isConfigured={authState.isConfigured} authError={authState.authError}
-              onSignIn={authState.signIn} onCreateAccount={authState.createAccount} onLogout={authState.logout}
-              onOpenRegistration={() => navigate('registration')} />
+            <AuthPanel
+              user={authState.user}
+              isConfigured={authState.isConfigured}
+              authError={authState.authError}
+              effectiveRole={authState.effectiveRole}
+              onSignIn={authState.signIn}
+              onCreateAccount={authState.createAccount}
+              onLogout={authState.logout}
+              onRefreshToken={authState.refreshToken}
+              onOpenRegistration={() => navigate('registration')}
+            />
           </div>
 
           <nav className="mt-5 space-y-1 overflow-y-auto" aria-label="Main navigation">
@@ -440,14 +448,16 @@ export default function App() {
               guard.canAccess('choir_member') ? (
                 <MassManagement currentLang={currentLang} masses={masses} payments={payments} members={members}
                   onAddMass={(mass) => {
-                    // choir_member and above can log masses
-                    if (!guard.canAccess('choir_member')) return;
-                    void massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
+                    if (!guard.canAccess('choir_member')) {
+                      return Promise.resolve({ ok: false, error: 'Missing or insufficient permissions. Activate admin access first.' });
+                    }
+                    return massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
                   }}
                   onAddPayment={(payment) => {
-                    // choir_admin and above can create payment records
-                    if (!guard.isAdmin) return;
-                    void paymentSync.upsert({ ...payment, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
+                    if (!guard.isAdmin) {
+                      return Promise.resolve({ ok: false, error: 'Missing or insufficient permissions. Activate admin access first.' });
+                    }
+                    return paymentSync.upsert({ ...payment, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
                   }}
                   onUpdatePayment={(id, receivedAmount, status) => {
                     if (!guard.isAdmin) return;

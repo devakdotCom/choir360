@@ -106,6 +106,15 @@ export function useFirebaseAuth() {
     await signOut(auth);
   };
 
+  // Forces a Firebase ID token refresh so newly set custom claims (role,
+  // tenantId, parishId, choirId) take effect immediately without sign-out.
+  // onIdTokenChanged fires on refresh and re-reads claims into state.
+  const refreshToken = async (): Promise<void> => {
+    if (auth?.currentUser) {
+      await auth.currentUser.getIdToken(true);
+    }
+  };
+
   const effectiveRole: Role = resolveAuthRole(claims, user);
 
   return {
@@ -118,5 +127,6 @@ export function useFirebaseAuth() {
     signIn,
     createAccount,
     logout,
+    refreshToken,
   };
 }

@@ -47,14 +47,10 @@ export interface CloudinaryMediaRecord extends TenantScopedRecord {
   bytes?: number;
   format?: string;
   resourceType?: 'image' | 'video' | 'raw' | 'auto';
-  /** Pixel dimensions returned by Cloudinary after upload */
   width?: number;
   height?: number;
-  /** Original file name selected by the user (before compression) */
   originalFileName?: string;
-  /** MIME type of the original file */
   mimeType?: string;
-  /** Size in bytes of the file that was actually uploaded (may be smaller after compression) */
   sizeBytes?: number;
 }
 
@@ -82,7 +78,7 @@ export interface Member {
   voiceType: VoiceType;
   memberType: MemberType;
   skills: string;
-  experience: number; // Years of experience
+  experience: number;
   emergencyContact: {
     name: string;
     relationship: string;
@@ -98,7 +94,7 @@ export type MassCategory = 'Sunday Mass' | 'Weekday Mass' | 'Special Mass' | 'De
 
 export interface Mass {
   id: string;
-  name: string; // e.g. "Sunday 1st Mass (Tamil)", "Feast Mass of St. Antony"
+  name: string;
   category: MassCategory;
   date: string;
   time: string;
@@ -118,11 +114,8 @@ export interface Payment {
   dateReceived?: string;
   status: 'Pending' | 'Received';
   remarks?: string;
-  /** ID of the linked Mass record */
   massId?: string;
-  /** Name of the person who made the payment */
   whoPaid?: string;
-  /** Cash / UPI / Cheque / Bank Transfer */
   paymentMode?: string;
   receiptNo?: string;
 }
@@ -152,7 +145,7 @@ export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Excused';
 
 export interface AttendanceRecord {
   id: string;
-  entityId: string; // MassId or EventId
+  entityId: string;
   entityType: 'Mass' | 'Practice' | 'Event';
   entityName: string;
   date: string;
@@ -181,7 +174,7 @@ export interface Song {
   id: string;
   title: string;
   displayTitle?: string;
-  lyricsTitle?: string; // Tamil transliterated title or original
+  lyricsTitle?: string;
   language: 'English' | 'Tamil' | 'Malayalam' | 'Telugu' | 'Hindi';
   album?: string;
   composer?: string;
@@ -189,7 +182,7 @@ export interface Song {
   category: 'Roman Catholic Songs' | 'Praise & Worship' | 'Devotional Songs' | 'Retreat Songs' | 'Choir Competition Songs' | 'Non-Catholic Christian Songs' | 'Unknown' | 'Jebathotta Jeyageethangal';
   source?: string;
   lyrics: string;
-  lyricsEnglishPattern?: string; // Standard English phonetic transliteration for search comparison
+  lyricsEnglishPattern?: string;
   chordSheet?: string;
   pdfUrl?: string;
   sourcePdfUrl?: string;
@@ -197,8 +190,8 @@ export interface Song {
   pageNumber?: number;
   sourceUrl?: string;
   sourceSearchText?: string;
-  audioUrl?: string; // Base64 audio or mockup
-  videoUrl?: string; // Youtube link or mock
+  audioUrl?: string;
+  videoUrl?: string;
 }
 
 export type BibleLanguage = 'ta' | 'en';

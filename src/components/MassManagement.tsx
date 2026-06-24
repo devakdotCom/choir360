@@ -18,9 +18,9 @@ interface MassManagementProps {
   masses: Mass[];
   payments: Payment[];
   members: Member[];
-  onAddMass: (newMass: Mass) => void;
+  onAddMass: (newMass: Mass) => Promise<{ ok: boolean; error?: string }> | void;
   /** Creates a brand-new payment record linked to a mass */
-  onAddPayment: (newPayment: Payment) => void;
+  onAddPayment: (newPayment: Payment) => Promise<{ ok: boolean; error?: string }> | void;
   /** Updates an existing payment record (for receiving outstanding dues) */
   onUpdatePayment: (paymentId: string, receivedAmount: number, status: 'Pending' | 'Received') => void;
 }
@@ -55,6 +55,7 @@ export const MassManagement: React.FC<MassManagementProps> = ({
   const [paymentRemarks,   setPaymentRemarks]   = useState('');
 
   const [massSuccess, setMassSuccess] = useState('');
+  const [massSaveError, setMassSaveError] = useState('');
 
   // ── Share calculator ────────────────────────────────────────────────────────
   const [selectedPaymentId,     setSelectedPaymentId]     = useState<string>(payments[0]?.id || '');
@@ -90,9 +91,10 @@ export const MassManagement: React.FC<MassManagementProps> = ({
   };
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-  const handleAddMass = (e: React.FormEvent) => {
+  const handleAddMass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!massName) return;
+    setMassSaveError('');
 
     const massId = `MS${String(masses.length + 1).padStart(3, '0')}`;
     const newMass: Mass = {
@@ -103,7 +105,17 @@ export const MassManagement: React.FC<MassManagementProps> = ({
       time: massTime,
       language: massLang,
     };
-    onAddMass(newMass);
+
+    const massResult = await onAddMass(newMass);
+    if (massResult && !massResult.ok) {
+      const isPermission = massResult.error?.toLowerCase().includes('permission') || massResult.error?.toLowerCase().includes('insufficient');
+      setMassSaveError(
+        isPermission
+          ? 'Save failed: your account does not have admin access. Use "Activate Admin Access" in the sign-in panel to set up your role.'
+          : `Save failed: ${massResult.error}`
+      );
+      return;
+    }
 
     // If a payment-type mass, create a brand-new Payment record via onAddPayment
     if (isPaymentMass(massCategory) && partyName && amountProposed > 0) {
@@ -130,7 +142,17 @@ export const MassManagement: React.FC<MassManagementProps> = ({
         receiptNo:      receiptNo   || undefined,
         remarks:        paymentRemarks || undefined,
       };
-      onAddPayment(newPayment);
+
+      const paymentResult = await onAddPayment(newPayment);
+      if (paymentResult && !paymentResult.ok) {
+        const isPermission = paymentResult.error?.toLowerCase().includes('permission') || paymentResult.error?.toLowerCase().includes('insufficient');
+        setMassSaveError(
+          isPermission
+            ? 'Mass logged but payment save failed: activate admin access first.'
+            : `Payment save failed: ${paymentResult.error}`
+        );
+        // Still clear form — mass was saved
+      }
     }
 
     // Reset form
@@ -224,6 +246,9 @@ export const MassManagement: React.FC<MassManagementProps> = ({
 
           {massSuccess && (
             <p className="text-xs p-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-medium">{massSuccess}</p>
+          )}
+          {massSaveError && (
+            <p className="text-xs p-2 bg-rose-50 text-rose-800 border border-rose-200 rounded font-medium">{massSaveError}</p>
           )}
 
           <form onSubmit={handleAddMass} className="space-y-3 text-xs">

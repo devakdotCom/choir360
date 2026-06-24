@@ -9,10 +9,6 @@ import { TenantScopedRecord } from '../types';
 
 type CollectionKey = Parameters<typeof listenToTenantCollection>[0];
 
-/**
- * useSyncedCollection – Firestore real-time sync with optimistic updates and
- * automatic rollback on write failure.
- */
 export function useSyncedCollection<T extends { id: string }>(
   collectionName: CollectionKey,
   fallbackRecords: T[],
@@ -29,7 +25,7 @@ export function useSyncedCollection<T extends { id: string }>(
     if (!isFirebaseConfigured || !syncEnabled) {
       setRecords(fallbackRecords);
       setIsLive(false);
-      setSyncError(null); // Clear any stale error from a previous signed-in session.
+      setSyncError(null);
       return;
     }
     const unsubscribe = listenToTenantCollection<T>(
@@ -41,8 +37,10 @@ export function useSyncedCollection<T extends { id: string }>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collectionName, syncEnabled]);
 
+  // Insert or replace a record. Returns { ok: true } on success or
+  // { ok: false, error } on Firestore rejection so callers can show the error.
   const upsert = useCallback(
-    async (record: T & Partial<TenantScopedRecord>, userId?: string) => {
+    async (record: T & Partial<TenantScopedRecord>, userId?: string): Promise<{ ok: boolean; error?: string }> => {
       const prev = recordsRef.current;
       setRecords([record, ...prev.filter((item) => item.id !== record.id)]);
       if (isFirebaseConfigured && syncEnabled) {
@@ -50,15 +48,20 @@ export function useSyncedCollection<T extends { id: string }>(
           await upsertTenantRecord(collectionName, record, userId);
         } catch (err) {
           setRecords(prev);
-          setSyncError(err instanceof Error ? err.message : 'Failed to save record.');
+          const msg = err instanceof Error ? err.message : 'Failed to save record.';
+          setSyncError(msg);
+          return { ok: false, error: msg };
         }
       }
+      return { ok: true };
     },
     [collectionName, syncEnabled],
   );
 
+  // Patch existing record fields. Returns { ok: true } on success or
+  // { ok: false, error } on Firestore rejection.
   const patch = useCallback(
-    async (recordId: string, patchData: Partial<T & TenantScopedRecord>, userId?: string) => {
+    async (recordId: string, patchData: Partial<T & TenantScopedRecord>, userId?: string): Promise<{ ok: boolean; error?: string }> => {
       const prev = recordsRef.current;
       setRecords(prev.map((item) => item.id === recordId ? { ...item, ...patchData } : item));
       if (isFirebaseConfigured && syncEnabled) {
@@ -66,9 +69,12 @@ export function useSyncedCollection<T extends { id: string }>(
           await updateTenantRecord(collectionName, recordId, patchData, userId);
         } catch (err) {
           setRecords(prev);
-          setSyncError(err instanceof Error ? err.message : 'Failed to update record.');
+          const msg = err instanceof Error ? err.message : 'Failed to update record.';
+          setSyncError(msg);
+          return { ok: false, error: msg };
         }
       }
+      return { ok: true };
     },
     [collectionName, syncEnabled],
   );

@@ -254,6 +254,59 @@ app.post("/api/admin/bootstrap-super-admin", async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// SELF-CLAIM CHOIR ADMIN ROLE
+// Allows a signed-in user to grant themselves choir_admin for this parish by
+// providing the ADMIN_BOOTSTRAP_SECRET. Use this to activate the first admin
+// account after signup. Once claimed, the user must force-refresh their token
+// (the frontend calls getIdToken(true)) for the new role to take effect.
+//
+// Claims set: role=choir_admin + tenantId/parishId/choirId from server env vars
+// (which must match VITE_DEFAULT_TENANT_ID / VITE_DEFAULT_PARISH_ID /
+// VITE_DEFAULT_CHOIR_ID so sameTenant() Firestore rules pass).
+// ---------------------------------------------------------------------------
+app.post("/api/auth/self-claim-choir-admin", requireFirebaseAuth, async (req, res) => {
+  try {
+    const configuredSecret = process.env.ADMIN_BOOTSTRAP_SECRET;
+    if (!configuredSecret || !configuredSecret.trim()) {
+      return res.status(503).json({ error: "ADMIN_BOOTSTRAP_SECRET is not configured on this server." });
+    }
+    if (!admin.apps.length) {
+      return res.status(503).json({ error: "Firebase Admin is not configured on this server." });
+    }
+
+    const secret = requireString(req.body?.secret, "secret", 200);
+    if (secret !== configuredSecret) {
+      return res.status(403).json({ error: "Invalid activation secret. Contact your system administrator." });
+    }
+
+    const uid = (req as any).user.uid;
+    const email = (req as any).user.email || "";
+
+    // Resolve tenant context from env (must match VITE_DEFAULT_* on the frontend)
+    const tenantId = process.env.VITE_DEFAULT_TENANT_ID || process.env.DEFAULT_TENANT_ID || "global";
+    const parishId = process.env.VITE_DEFAULT_PARISH_ID || process.env.DEFAULT_PARISH_ID || "st-thomas-cathedral";
+    const choirId  = process.env.VITE_DEFAULT_CHOIR_ID  || process.env.DEFAULT_CHOIR_ID  || "st-thomas-cathedral-choir";
+
+    await admin.auth().setCustomUserClaims(uid, {
+      role:     "choir_admin",
+      tenantId,
+      parishId,
+      choirId,
+    });
+
+    console.log(`[Auth] choir_admin claims set for uid=${uid} email=${email} tenant=${tenantId}/${parishId}/${choirId}`);
+
+    return res.json({
+      ok: true,
+      message: `Admin access activated for ${email || uid}. Your role is now choir_admin.`,
+      claims: { role: "choir_admin", tenantId, parishId, choirId },
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error?.message || "Failed to activate admin access." });
+  }
+});
+
 type BibleLanguage = "ta" | "en";
 
 interface ReadingSection {
