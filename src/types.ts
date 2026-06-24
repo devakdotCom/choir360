@@ -118,6 +118,13 @@ export interface Payment {
   dateReceived?: string;
   status: 'Pending' | 'Received';
   remarks?: string;
+  /** ID of the linked Mass record */
+  massId?: string;
+  /** Name of the person who made the payment */
+  whoPaid?: string;
+  /** Cash / UPI / Cheque / Bank Transfer */
+  paymentMode?: string;
+  receiptNo?: string;
 }
 
 export interface ShareCalculation {

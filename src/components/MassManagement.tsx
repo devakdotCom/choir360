@@ -19,6 +19,9 @@ interface MassManagementProps {
   payments: Payment[];
   members: Member[];
   onAddMass: (newMass: Mass) => void;
+  /** Creates a brand-new payment record linked to a mass */
+  onAddPayment: (newPayment: Payment) => void;
+  /** Updates an existing payment record (for receiving outstanding dues) */
   onUpdatePayment: (paymentId: string, receivedAmount: number, status: 'Pending' | 'Received') => void;
 }
 
@@ -28,6 +31,7 @@ export const MassManagement: React.FC<MassManagementProps> = ({
   payments,
   members,
   onAddMass,
+  onAddPayment,
   onUpdatePayment,
 }) => {
   const dict = MULTILINGUAL_DICTIONARY[currentLang] || MULTILINGUAL_DICTIONARY.en;
@@ -90,19 +94,46 @@ export const MassManagement: React.FC<MassManagementProps> = ({
     e.preventDefault();
     if (!massName) return;
 
-    const id = `MS${String(masses.length + 1).padStart(3, '0')}`;
-    const newMass: Mass = { id, name: massName, category: massCategory, date: massDate, time: massTime, language: massLang };
+    const massId = `MS${String(masses.length + 1).padStart(3, '0')}`;
+    const newMass: Mass = {
+      id: massId,
+      name: massName,
+      category: massCategory,
+      date: massDate,
+      time: massTime,
+      language: massLang,
+    };
     onAddMass(newMass);
 
-    // If a payment mass, create payment record too
+    // If a payment-type mass, create a brand-new Payment record via onAddPayment
     if (isPaymentMass(massCategory) && partyName && amountProposed > 0) {
-      const status = paymentStatus(amountProposed, amountReceived, receivedAmount);
-      const recvAmt = amountReceived ? receivedAmount : 0;
-      const pending = Math.max(amountProposed - recvAmt, 0);
-      const pid = `PAY${String(payments.length + 1).padStart(3, '0')}`;
-      onUpdatePayment(pid, recvAmt, status);
+      const recvAmt   = amountReceived ? receivedAmount : 0;
+      const pending   = Math.max(amountProposed - recvAmt, 0);
+      const status    = paymentStatus(amountProposed, amountReceived, receivedAmount);
+      const pid       = `PAY${String(payments.length + 1).padStart(3, '0')}`;
+
+      const newPayment: Payment = {
+        id:             pid,
+        massId,
+        partyName,
+        mobile:         '',           // not collected on this form
+        massType:       massCategory,
+        massDate,
+        massTime,
+        promisedAmount: amountProposed,
+        receivedAmount: recvAmt,
+        pendingAmount:  pending,
+        dateReceived:   dateReceived || undefined,
+        status,
+        whoPaid:        whoPaid  || undefined,
+        paymentMode:    paymentMode || undefined,
+        receiptNo:      receiptNo   || undefined,
+        remarks:        paymentRemarks || undefined,
+      };
+      onAddPayment(newPayment);
     }
 
+    // Reset form
     setMassName('');
     setPartyName('');
     setAmountProposed(0);

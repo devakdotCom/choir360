@@ -440,8 +440,14 @@ export default function App() {
               guard.canAccess('choir_member') ? (
                 <MassManagement currentLang={currentLang} masses={masses} payments={payments} members={members}
                   onAddMass={(mass) => {
-                    if (!guard.isAdmin) return;
+                    // choir_member and above can log masses
+                    if (!guard.canAccess('choir_member')) return;
                     void massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
+                  }}
+                  onAddPayment={(payment) => {
+                    // choir_admin and above can create payment records
+                    if (!guard.isAdmin) return;
+                    void paymentSync.upsert({ ...payment, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
                   }}
                   onUpdatePayment={(id, receivedAmount, status) => {
                     if (!guard.isAdmin) return;
