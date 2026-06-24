@@ -20,7 +20,8 @@ import {
   Shield
 } from 'lucide-react';
 import { MULTILINGUAL_DICTIONARY } from '../data/mockData';
-import { uploadMediaToCloudinary, validateMediaFile } from '../services/cloudinary';
+import { ProfilePhotoUpload } from './media/ProfilePhotoUpload';
+import type { CloudinaryMediaRecord } from '../types';
 import { useParish } from '../features/parish/ParishContext';
 import { activeParishes } from '../data/madrasMylaporeParishes';
 
@@ -161,10 +162,10 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({
   const parishes = activeParishes();
 
   // State for form
+  /** Avatar URL selected from the dropdown — used as fallback if no Cloudinary upload */
   const [photoUrl, setPhotoUrl] = useState('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [uploadStatus, setUploadStatus] = useState('');
-  const [photoFileError, setPhotoFileError] = useState('');
+  /** Set once the ProfilePhotoUpload component completes a successful Cloudinary upload */
+  const [cloudinaryRecord, setCloudinaryRecord] = useState<CloudinaryMediaRecord | null>(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [gender, setGender] = useState('Male');
@@ -196,25 +197,12 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({
     }
 
     const memberId = `M${String(members.length + 1).padStart(3, '0')}`;
-    let finalPhotoUrl = photoUrl;
-
-    if (photoFile) {
-      try {
-        setUploadStatus('Uploading profile photo to Cloudinary...');
-        const media = await uploadMediaToCloudinary(photoFile, {
-          moduleName: 'members',
-          relatedRecordId: memberId,
-          uploadedByUserId: 'public_user',
-        });
-        finalPhotoUrl = media.thumbnailUrl || media.optimizedUrl || media.secureUrl;
-        setUploadStatus('Photo uploaded and Cloudinary metadata saved.');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown upload error';
-        setUploadStatus('');
-        alert(`Profile photo upload failed: ${message}`);
-        return;
-      }
-    }
+    // If the user completed a Cloudinary upload via ProfilePhotoUpload, use that URL.
+    // Otherwise fall back to the avatar dropdown selection.
+    const finalPhotoUrl =
+      cloudinaryRecord?.optimizedUrl ||
+      cloudinaryRecord?.secureUrl ||
+      photoUrl;
 
     const newMember: Member = {
       id: memberId,
@@ -506,34 +494,13 @@ export const MemberRegistration: React.FC<MemberRegistrationProps> = ({
               </div>
 
               <div className="space-y-1 md:col-span-2 rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 p-3">
-                <label className="text-[11px] font-bold text-emerald-800 uppercase">Cloudinary Profile Photo Upload</label>
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0] || null;
-                    setPhotoFileError('');
-                    if (!file) {
-                      setPhotoFile(null);
-                      return;
-                    }
-                    try {
-                      await validateMediaFile(file);
-                      setPhotoFile(file);
-                    } catch (error) {
-                      setPhotoFile(null);
-                      e.target.value = '';
-                      setPhotoFileError(error instanceof Error ? error.message : 'Invalid file.');
-                    }
-                  }}
-                  className="mt-2 w-full text-xs text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white"
+                <label className="text-[11px] font-bold text-emerald-800 uppercase">Profile Photo Upload</label>
+                <ProfilePhotoUpload
+                  memberId={`M${String(members.length + 1).padStart(3, '0')}`}
+                  uploadedByUserId="public_user"
+                  currentPhotoUrl={cloudinaryRecord?.optimizedUrl || cloudinaryRecord?.secureUrl || photoUrl}
+                  onUploadComplete={(record) => setCloudinaryRecord(record)}
                 />
-                <p className="mt-2 text-[10px] leading-relaxed text-emerald-800">
-                  Uploaded images go to Cloudinary first; the returned public ID, secure URL, thumbnail URL, optimized URL, upload timestamp, module name, related member ID, and uploader ID are then written to Firebase. JPEG/PNG/WebP/HEIC only, max 8MB, max 6000px per side.
-                </p>
-                {photoFile && <p className="mt-1 text-[10px] font-bold text-slate-600">Selected: {photoFile.name}</p>}
-                {photoFileError && <p className="mt-1 text-[10px] font-bold text-rose-600">{photoFileError}</p>}
-                {uploadStatus && <p className="mt-1 text-[10px] font-bold text-emerald-700">{uploadStatus}</p>}
               </div>
 
               <div className="space-y-1 md:col-span-2">

@@ -47,6 +47,15 @@ export interface CloudinaryMediaRecord extends TenantScopedRecord {
   bytes?: number;
   format?: string;
   resourceType?: 'image' | 'video' | 'raw' | 'auto';
+  /** Pixel dimensions returned by Cloudinary after upload */
+  width?: number;
+  height?: number;
+  /** Original file name selected by the user (before compression) */
+  originalFileName?: string;
+  /** MIME type of the original file */
+  mimeType?: string;
+  /** Size in bytes of the file that was actually uploaded (may be smaller after compression) */
+  sizeBytes?: number;
 }
 
 export type SyncedRecord<T> = T & TenantScopedRecord;

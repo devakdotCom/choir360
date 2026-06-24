@@ -4,6 +4,11 @@ import { apiFetch } from '../services/apiClient';
 import { useFirebaseAuth, hasMinimumRole } from '../hooks/useFirebaseAuth';
 import { DailyReadingsCard } from './bible/DailyReadingsCard';
 import { DailyReadingsSyncPanel } from './bible/DailyReadingsSyncPanel';
+import {
+  useCatholicHubSongs,
+  type CatholicHubSong,
+  type CatholicHubSongSyncStatus,
+} from '../features/songs/hooks/useCatholicHubSongs';
 
 // ─── Static Saints Database (June focus) ────────────────────────────────────
 const SAINTS_DATABASE = [
@@ -213,33 +218,7 @@ const HUB_SONG_CATEGORIES = [
   { categoryId: 'keerthana',      categoryTamil: 'கிறிஸ்தவக் கீர்த்தனைகள்',         sourceUrl: 'https://www.radio.catholictamil.com/p/blog-page_9031.html' },
 ];
 
-interface CatholicHubSong {
-  id: string;
-  title: string;
-  category: string;
-  categoryTamil: string;
-  lyrics: string;
-  lyricsNormalized?: string;
-  titleNormalized?: string;
-  sourceUrl: string;
-  sourcePage: string;
-  order: number;
-  tags: string[];
-  lastSyncedAt?: string;
-}
-
-interface CatholicHubSongSyncStatus {
-  categoryId: string;
-  categoryTamil: string;
-  sourceUrl: string;
-  lastSyncedAt?: string;
-  lastSuccessAt?: string;
-  lastFailureAt?: string;
-  status?: string;
-  errorMessage?: string;
-  totalSongsSynced?: number;
-  syncDurationMs?: number;
-}
+// CatholicHubSong and CatholicHubSongSyncStatus are imported from the hook above.
 
 type HubTab = 'gospel' | 'saints' | 'prayers' | 'calendar' | 'updates';
 
@@ -287,29 +266,7 @@ function decodeHubHtmlEntities(value: string) {
   return decoded;
 }
 
-function sanitizeHubSong(song: CatholicHubSong): CatholicHubSong {
-  const title = decodeHubHtmlEntities(song.title || '');
-  const categoryTamil = decodeHubHtmlEntities(song.categoryTamil || '');
-  const lyrics = decodeHubHtmlEntities(song.lyrics || '');
-  const tags = Array.isArray(song.tags) ? song.tags.map((tag) => decodeHubHtmlEntities(String(tag))) : [];
-
-  return {
-    ...song,
-    title,
-    categoryTamil,
-    lyrics,
-    tags,
-    titleNormalized: normalizeHubSearch(title),
-    lyricsNormalized: normalizeHubSearch(lyrics),
-  };
-}
-
-function sanitizeHubStatus(status: CatholicHubSongSyncStatus): CatholicHubSongSyncStatus {
-  return {
-    ...status,
-    categoryTamil: decodeHubHtmlEntities(status.categoryTamil || ''),
-  };
-}
+// sanitizeHubSong / sanitizeHubStatus removed — Firestore stores pre-decoded data.
 
 function expandHubSearchQuery(query: string) {
   const normalized = normalizeHubSearch(query);
@@ -329,62 +286,29 @@ export const CatholicKnowledgeHub: React.FC = () => {
   const { effectiveRole } = useFirebaseAuth();
   const isAdmin = hasMinimumRole(effectiveRole, 'choir_admin');
 
-  const [songs, setSongs] = useState<CatholicHubSong[]>([]);
-  const [songSyncStatus, setSongSyncStatus] = useState<CatholicHubSongSyncStatus[]>([]);
-  const [isLoadingSongs, setIsLoadingSongs] = useState(false);
-  const [songsError, setSongsError] = useState('');
+  // ── Songs — loaded once from Firestore; never triggers a source scrape ──────
+  const {
+    songs,
+    syncStatuses,
+    loading: isLoadingSongs,
+    error: songsError,
+    refresh: loadSongs,
+  } = useCatholicHubSongs();
+
   const [songSearch, setSongSearch] = useState('');
   const [songCategory, setSongCategory] = useState('all');
   const [selectedSongId, setSelectedSongId] = useState('');
   const [isSyncingSongs, setIsSyncingSongs] = useState(false);
   const [mobileSongOpen, setMobileSongOpen] = useState(false);
-  const [autoSyncAttempted, setAutoSyncAttempted] = useState(false);
 
-  const loadSongs = async () => {
-    setIsLoadingSongs(true);
-    setSongsError('');
-    try {
-      const response = await apiFetch(`/api/catholic-hub/songs?category=${encodeURIComponent(songCategory)}`);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.error || 'Songs are not available yet. Please sync content or try again.');
-      const loadedSongs = (payload.songs || []).map(sanitizeHubSong);
-      if (loadedSongs.length === 0 && !autoSyncAttempted) {
-        setAutoSyncAttempted(true);
-        const syncResponse = await apiFetch('/api/catholic-hub/songs/sync', {
-          method: 'POST',
-          body: JSON.stringify({ categoryId: songCategory }),
-        });
-        if (syncResponse.ok) {
-          const retryResponse = await apiFetch(`/api/catholic-hub/songs?category=${encodeURIComponent(songCategory)}`);
-          const retryPayload = await retryResponse.json();
-          if (retryResponse.ok) {
-            const retrySongs = (retryPayload.songs || []).map(sanitizeHubSong);
-            setSongs(retrySongs);
-            setSongSyncStatus((retryPayload.syncStatus || []).map(sanitizeHubStatus));
-            const nextSong = retrySongs[0];
-            setSelectedSongId((current) => current || nextSong?.id || '');
-            return;
-          }
-        }
-      }
-      setSongs(loadedSongs);
-      setSongSyncStatus((payload.syncStatus || []).map(sanitizeHubStatus));
-      const hashSongId = window.location.hash.replace(/^#song-/, '');
-      const nextSong = loadedSongs.find((item: CatholicHubSong) => item.id === hashSongId) || loadedSongs[0];
-      setSelectedSongId((current) => current || nextSong?.id || '');
-    } catch {
-      setSongsError('Songs are not available yet. Please sync content or try again.');
-    } finally {
-      setIsLoadingSongs(false);
-    }
-  };
-
+  // Auto-select first song when the tab becomes active and songs are loaded
   useEffect(() => {
-    if (tab === 'updates' && songs.length === 0 && !isLoadingSongs) {
-      void loadSongs();
+    if (tab === 'updates' && songs.length > 0 && !selectedSongId) {
+      const hashSongId = window.location.hash.replace(/^#song-/, '');
+      const next = songs.find((s) => s.id === hashSongId) || songs[0];
+      if (next) setSelectedSongId(next.id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, songCategory]);
+  }, [tab, songs, selectedSongId]);
 
   const triggerSongSync = async (categoryId = 'all') => {
     setIsSyncingSongs(true);
@@ -395,9 +319,10 @@ export const CatholicKnowledgeHub: React.FC = () => {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || 'Sync failed.');
+      // Re-read Firestore after backend sync completes
       await loadSongs();
     } catch (error) {
-      setSongsError(error instanceof Error ? error.message : 'Sync failed.');
+      console.error('[Catholic Hub] manual sync error:', error);
     } finally {
       setIsSyncingSongs(false);
     }
@@ -433,8 +358,9 @@ export const CatholicKnowledgeHub: React.FC = () => {
   }, [filteredSongs]);
 
   const selectedSong = songs.find((song) => song.id === selectedSongId) || filteredSongs[0] || songs[0];
-  const selectedStatus = songSyncStatus.find((status) => status.categoryId === songCategory)
-    || songSyncStatus.find((status) => status.categoryId === selectedSong?.category);
+  const selectedStatus: CatholicHubSongSyncStatus | undefined =
+    syncStatuses.find((s) => s.categoryId === songCategory) ||
+    syncStatuses.find((s) => s.categoryId === selectedSong?.category);
 
   const selectSong = (song: CatholicHubSong, openMobile = false) => {
     setSelectedSongId(song.id);
@@ -528,8 +454,10 @@ export const CatholicKnowledgeHub: React.FC = () => {
                   <h2 className="mt-1 text-xl font-black text-slate-900">Songs</h2>
                   <p className="mt-1 text-xs text-slate-500">
                     {selectedStatus?.lastSuccessAt
-                      ? `Last synced ${new Date(selectedStatus.lastSuccessAt).toLocaleString()}`
-                      : 'Songs are not synced yet.'}
+                      ? `Last synced ${new Date(selectedStatus.lastSuccessAt).toLocaleString()} · ${songs.length} songs`
+                      : songs.length > 0
+                      ? `${songs.length} songs loaded from cache`
+                      : 'No songs synced yet. Admin can run initial sync.'}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -617,7 +545,11 @@ export const CatholicKnowledgeHub: React.FC = () => {
                     ) : filteredSongs.length === 0 ? (
                       <div className="space-y-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
                         <p className="px-2 py-1 text-center font-bold text-slate-700">
-                          {songs.length === 0 ? 'Song sync is pending. Open the source categories below.' : 'No songs match your search.'}
+                          {songs.length === 0
+                            ? isAdmin
+                              ? 'No songs synced yet. Click "Sync all" to populate the library.'
+                              : 'Songs not yet available. Check back later.'
+                            : 'No songs match your search.'}
                         </p>
                         {songs.length === 0 && HUB_SONG_CATEGORIES.map((category) => (
                           <a

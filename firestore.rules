@@ -331,16 +331,20 @@ service cloud.firestore {
     }
 
     match /catholicHubSongs/{songId} {
+      // Public users can read active songs; admins can read all (including archived)
       allow read: if resource.data.status == 'active' || adminRole();
 
-      allow create, update: if adminRole() && hasRequiredEnvelope()
-        && request.resource.data.keys().hasAll([
-          'id', 'title', 'titleNormalized', 'category', 'categoryTamil',
-          'lyrics', 'lyricsNormalized', 'language', 'sourceUrl',
-          'sourcePage', 'tags', 'order', 'status', 'lastSyncedAt'
-        ]);
+      // Only the backend (Admin SDK, bypasses rules) writes song records during sync.
+      // Client-side writes are blocked for songs — all mutations go through the API.
+      allow create, update: if false;
 
       allow delete: if false;
+    }
+
+    // Sync status is written by the server (Admin SDK) and read by admins only.
+    match /catholicHubSongSyncStatus/{categoryId} {
+      allow read: if adminRole();
+      allow create, update, delete: if false;
     }
 
     // Sync metadata is an operational/admin concern only — not shown to
@@ -381,8 +385,14 @@ service cloud.firestore {
         && existingInTenant()
         && notDeleted();
 
+      // Allow any authenticated user (including anonymous sign-in from public
+      // registration) to create a media record after a successful Cloudinary upload.
+      // `sameTenant()` is intentionally not required here because anonymous users
+      // lack custom JWT claims (tenantId / parishId / choirId). The tenantId is
+      // written server-side via DEFAULT_TENANT_CONTEXT, so the data is still
+      // scoped correctly. The backend signs the Cloudinary upload, so writes
+      // here are already gated by the signature endpoint.
       allow create: if signedIn()
-        && sameTenant()
         && hasRequiredEnvelope()
         && request.resource.data.keys().hasAll([
           'publicId', 'secureUrl', 'thumbnailUrl', 'optimizedUrl',

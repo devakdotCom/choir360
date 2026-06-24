@@ -4,11 +4,21 @@ import { createRecordMetadata } from './recordMetadata';
 import { auth, upsertTenantRecord } from './firebase';
 import { apiFetch } from './apiClient';
 
-interface CloudinaryUploadContext {
+// ── Upload context ────────────────────────────────────────────────────────────
+
+export interface CloudinaryUploadContext {
   moduleName: CloudinaryMediaRecord['moduleName'];
   relatedRecordId: string;
   uploadedByUserId: string;
+  /** Original filename before any compression */
+  originalFileName?: string;
+  /** MIME type of the original file */
+  mimeType?: string;
+  /** Size in bytes of the original file */
+  sizeBytes?: number;
 }
+
+// ── Cloudinary API response shape ─────────────────────────────────────────────
 
 interface CloudinaryUploadResponse {
   public_id: string;
@@ -17,10 +27,17 @@ interface CloudinaryUploadResponse {
   format?: string;
   resource_type?: 'image' | 'video' | 'raw';
   created_at?: string;
+  /** Pixel dimensions — returned for image uploads */
+  width?: number;
+  height?: number;
 }
+
+// ── Config ────────────────────────────────────────────────────────────────────
 
 const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
 const uploadFolder = import.meta.env.VITE_CLOUDINARY_UPLOAD_FOLDER || 'choir360';
+
+// ── URL builder ───────────────────────────────────────────────────────────────
 
 export function buildCloudinaryImageUrl(publicId: string, transformation: string) {
   if (!cloudName) return '';
@@ -29,71 +46,38 @@ export function buildCloudinaryImageUrl(publicId: string, transformation: string
 
 // ---------------------------------------------------------------------------
 // CLIENT-SIDE UPLOAD VALIDATION
-// Rejects bad files immediately instead of after a signature round-trip and
-// a multi-MB upload to Cloudinary. The server-side signature endpoint trusts
-// the folder name but does not otherwise constrain file size/type/dimensions,
-// so this is the only real gate today — keep it in sync with any future
-// server-side checks rather than relying on it alone.
+// Re-exported from imageValidation.ts for backward compat — callers that
+// imported validateMediaFile directly from this module continue to work.
 // ---------------------------------------------------------------------------
-const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024; // 8MB
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
-const MAX_IMAGE_DIMENSION_PX = 6000;
+export { validateImageFile as validateMediaFile } from '../utils/imageValidation';
 
-function formatBytes(bytes: number) {
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
+// ── Main upload function ──────────────────────────────────────────────────────
 
-async function readImageDimensions(file: File): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('The selected file could not be read as a valid image.'));
-    };
-    img.src = url;
-  });
-}
-
-export async function validateMediaFile(file: File): Promise<void> {
-  if (!file || file.size === 0) {
-    throw new Error('The selected file is empty.');
-  }
-
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    throw new Error(`File is too large (${formatBytes(file.size)}). Maximum allowed size is ${formatBytes(MAX_FILE_SIZE_BYTES)}.`);
-  }
-
-  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-    throw new Error(`Unsupported file type "${file.type || 'unknown'}". Allowed types: JPEG, PNG, WebP, HEIC.`);
-  }
-
-  const { width, height } = await readImageDimensions(file);
-  if (width > MAX_IMAGE_DIMENSION_PX || height > MAX_IMAGE_DIMENSION_PX) {
-    throw new Error(`Image dimensions (${width}x${height}) exceed the maximum of ${MAX_IMAGE_DIMENSION_PX}px per side.`);
-  }
-}
-
+/**
+ * Uploads a file to Cloudinary using a server-side signed request, then
+ * writes the resulting metadata to Firestore.
+ *
+ * Firestore write is best-effort: if it fails (e.g. anonymous user without
+ * tenant claims), the function still returns the Cloudinary record so callers
+ * can use the CDN URLs immediately.
+ */
 export async function uploadMediaToCloudinary(
   file: File,
   context: CloudinaryUploadContext,
 ): Promise<CloudinaryMediaRecord> {
   if (!cloudName) {
-    throw new Error('Cloudinary is not configured. Add VITE_CLOUDINARY_CLOUD_NAME before uploading media.');
+    throw new Error(
+      'Cloudinary is not configured. Add VITE_CLOUDINARY_CLOUD_NAME before uploading media.',
+    );
   }
 
-  await validateMediaFile(file);
-
-  // The signature endpoint requires a Firebase ID token. Public registration
-  // users are not logged in, so sign them in anonymously to obtain one.
+  // The signature endpoint requires a Firebase ID token.
+  // Public registration users are unauthenticated, so sign them in anonymously.
   if (auth && !auth.currentUser) {
     await signInAnonymously(auth);
   }
 
+  // ── 1. Get signed upload parameters from the backend ──────────────────────
   const signatureResponse = await apiFetch('/api/cloudinary/signature', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -109,35 +93,46 @@ export async function uploadMediaToCloudinary(
   });
 
   if (!signatureResponse.ok) {
-    throw new Error('Could not create a secure Cloudinary upload signature.');
+    const errorBody = await signatureResponse.json().catch(() => ({}));
+    throw new Error(
+      errorBody?.error || 'Could not create a secure Cloudinary upload signature.',
+    );
   }
 
-  const signaturePayload = await signatureResponse.json();
+  const sig = await signatureResponse.json();
+
+  // ── 2. Upload the file directly to Cloudinary ─────────────────────────────
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('api_key', signaturePayload.apiKey);
-  formData.append('timestamp', signaturePayload.timestamp);
-  formData.append('signature', signaturePayload.signature);
-  formData.append('folder', signaturePayload.folder);
-  formData.append('tags', signaturePayload.tags);
-  formData.append('context', signaturePayload.context);
+  formData.append('api_key', sig.apiKey);
+  formData.append('timestamp', sig.timestamp);
+  formData.append('signature', sig.signature);
+  formData.append('folder', sig.folder);
+  formData.append('tags', sig.tags);
+  formData.append('context', sig.context);
 
-  const uploadResponse = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, {
-    method: 'POST',
-    body: formData,
-  });
+  const uploadResponse = await fetch(
+    `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
+    { method: 'POST', body: formData },
+  );
 
   if (!uploadResponse.ok) {
-    throw new Error('Cloudinary upload failed.');
+    const errBody = await uploadResponse.json().catch(() => ({}));
+    throw new Error(errBody?.error?.message || 'Cloudinary upload failed.');
   }
 
-  const uploaded = await uploadResponse.json() as CloudinaryUploadResponse;
+  const uploaded = (await uploadResponse.json()) as CloudinaryUploadResponse;
+
+  // ── 3. Build the local media record ───────────────────────────────────────
   const uploadedAt = uploaded.created_at || new Date().toISOString();
   const mediaRecord: CloudinaryMediaRecord = {
     id: uploaded.public_id.replace(/[/.]/g, '_'),
     publicId: uploaded.public_id,
     secureUrl: uploaded.secure_url,
-    thumbnailUrl: buildCloudinaryImageUrl(uploaded.public_id, 'c_fill,w_240,h_240,q_auto,f_auto'),
+    thumbnailUrl: buildCloudinaryImageUrl(
+      uploaded.public_id,
+      'c_fill,w_240,h_240,q_auto,f_auto',
+    ),
     optimizedUrl: buildCloudinaryImageUrl(uploaded.public_id, 'q_auto,f_auto'),
     uploadedAt,
     uploadedByUserId: context.uploadedByUserId,
@@ -146,9 +141,25 @@ export async function uploadMediaToCloudinary(
     bytes: uploaded.bytes,
     format: uploaded.format,
     resourceType: uploaded.resource_type || 'auto',
+    width: uploaded.width,
+    height: uploaded.height,
+    originalFileName: context.originalFileName,
+    mimeType: context.mimeType,
+    sizeBytes: context.sizeBytes ?? uploaded.bytes,
     ...createRecordMetadata(context.uploadedByUserId, 'active'),
   };
 
-  await upsertTenantRecord('media', mediaRecord, context.uploadedByUserId);
+  // ── 4. Persist metadata to Firestore (best-effort) ────────────────────────
+  // May fail for anonymous users who lack tenant custom claims. The Cloudinary
+  // upload already succeeded, so we return the record regardless.
+  try {
+    await upsertTenantRecord('media', mediaRecord, context.uploadedByUserId);
+  } catch (firestoreErr) {
+    console.warn(
+      '[Cloudinary] Firestore media record write skipped (non-fatal):',
+      firestoreErr,
+    );
+  }
+
   return mediaRecord;
 }

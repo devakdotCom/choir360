@@ -578,11 +578,19 @@ interface CatholicHubSongRecord {
   lyricsNormalized: string;
   language: "ta";
   sourceUrl: string;
+  /** Individual song page URL (canonical field name) */
+  sourcePageUrl: string;
+  /** Legacy alias kept for backward compat */
   sourcePage: string;
   tags: string[];
   order: number;
-  status: "active" | "disabled";
+  status: "active" | "archived" | "disabled";
+  /** SHA-256 first-16 of title+lyrics — used for incremental diff */
+  contentHash: string;
+  isArchived: boolean;
   isFeatured: boolean;
+  /** ISO timestamp of when last seen on the source category page */
+  lastSourceSeenAt: string;
   lastSyncedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -602,8 +610,16 @@ interface CatholicHubSongSyncStatusRecord {
   lastSuccessAt?: string;
   lastFailureAt?: string;
   errorMessage?: string;
+  /** Detailed diff counts */
+  totalFetched: number;
+  totalCreated: number;
+  totalUpdated: number;
+  totalUnchanged: number;
+  totalArchived: number;
+  /** Legacy field — sum of created + updated */
   totalSongsSynced: number;
   syncDurationMs: number;
+  nextScheduledSyncAt?: string;
 }
 
 // Free, rule-based keyword categorization — no paid AI required.
@@ -778,6 +794,19 @@ function makeCatholicHubSongId(categoryId: string, title: string, order: number)
   return `${categoryId}-${digest}`;
 }
 
+/**
+ * Short SHA-256 fingerprint of a song's content.
+ * Used for incremental diff — only songs whose content actually changed are
+ * written to Firestore, keeping write costs low.
+ */
+function computeContentHash(title: string, lyrics: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(`${title}\n${lyrics}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
 async function fetchCatholicTamilFeedPage(startIndex: number, maxResults: number) {
   const url = `${CATHOLIC_TAMIL_FEED_URL}?alt=json&start-index=${startIndex}&max-results=${maxResults}`;
   const response = await fetch(url, {
@@ -880,100 +909,228 @@ async function syncCatholicHubSongs(categoryId?: CatholicHubSongCategoryId | "al
   }
 
   const categories = resolveCatholicHubSongCategories(categoryId);
-  const db = admin.firestore();
-  const synced: Array<{ categoryId: string; totalSongsSynced: number; syncDurationMs: number }> = [];
+  const firestore = admin.firestore();
+  const now = new Date().toISOString();
+
+  // Next scheduled sync = first day of next month at 04:00 IST
+  const nextSync = (() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1, 1);
+    d.setHours(4, 0, 0, 0);
+    return d.toISOString();
+  })();
+
+  const synced: Array<{
+    categoryId: string;
+    totalFetched: number;
+    totalCreated: number;
+    totalUpdated: number;
+    totalUnchanged: number;
+    totalArchived: number;
+    syncDurationMs: number;
+  }> = [];
 
   for (const category of categories) {
     const startedAt = Date.now();
-    const now = new Date().toISOString();
-    const statusRef = db.collection("catholicHubSongSyncStatus").doc(category.categoryId);
+    const statusRef = firestore.collection("catholicHubSongSyncStatus").doc(category.categoryId);
+
+    // Mark as syncing
     await statusRef.set({
       categoryId: category.categoryId,
       categoryTamil: category.categoryTamil,
       sourceUrl: category.sourceUrl,
       status: "syncing",
       lastSyncedAt: now,
+      totalFetched: 0,
+      totalCreated: 0,
+      totalUpdated: 0,
+      totalUnchanged: 0,
+      totalArchived: 0,
       totalSongsSynced: 0,
       syncDurationMs: 0,
     } satisfies CatholicHubSongSyncStatusRecord, { merge: true });
 
     try {
+      // ── 1. Fetch source page ───────────────────────────────────────────────
       const categoryHtml = await fetchCatholicTamilHtml(category.sourceUrl);
       const links = extractCatholicSongLinks(categoryHtml, category.sourceUrl);
-      const records: CatholicHubSongRecord[] = [];
+
+      // ── 2. Fetch all existing songs for this category from Firestore ───────
+      const existingSnap = await firestore
+        .collection("catholicHubSongs")
+        .where("category", "==", category.categoryId)
+        .get();
+
+      // Map: sourceUrl → existing Firestore document data
+      const existingBySourceUrl = new Map<string, FirebaseFirestore.DocumentData>();
+      for (const doc of existingSnap.docs) {
+        const data = doc.data();
+        if (data.sourceUrl) existingBySourceUrl.set(data.sourceUrl, data);
+      }
+
+      // ── 3. Fetch individual song pages & build diff ────────────────────────
+      const toWrite: CatholicHubSongRecord[] = [];
+      const seenSourceUrls = new Set<string>();
+      let totalCreated = 0;
+      let totalUpdated = 0;
+      let totalUnchanged = 0;
 
       for (const [index, link] of links.entries()) {
+        seenSourceUrls.add(link.sourceUrl);
         try {
           const songHtml = await fetchCatholicTamilHtml(link.sourceUrl);
           const extracted = extractCatholicSongLyrics(songHtml, link.title);
           const title = extracted.title || link.title;
           const lyrics = extracted.lyrics || "";
-          records.push({
-            id: makeCatholicHubSongId(category.categoryId, title, index + 1),
-            title,
-            titleNormalized: normalizeTamilSearchText(title),
-            category: category.categoryId,
-            categoryTamil: category.categoryTamil,
-            lyrics,
-            lyricsNormalized: normalizeTamilSearchText(lyrics),
-            language: "ta",
-            sourceUrl: link.sourceUrl,
-            sourcePage: category.sourceUrl,
-            tags: [category.categoryTamil, category.categoryId],
-            order: index + 1,
-            status: "active",
-            isFeatured: false,
-            lastSyncedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            createdBy: userId,
-            updatedBy: userId,
-            ...DEFAULT_TENANT_CONTEXT,
-          });
+          const contentHash = computeContentHash(title, lyrics);
+          const existing = existingBySourceUrl.get(link.sourceUrl);
+
+          if (existing) {
+            if (existing.contentHash === contentHash) {
+              // Content unchanged — just update lastSourceSeenAt (cheap touch)
+              totalUnchanged++;
+              toWrite.push({
+                ...(existing as CatholicHubSongRecord),
+                lastSourceSeenAt: now,
+                lastSyncedAt: now,
+                updatedAt: now,
+                updatedBy: userId,
+                isArchived: false,
+                status: "active",
+              });
+            } else {
+              // Content changed — update title/lyrics/hash
+              totalUpdated++;
+              toWrite.push({
+                ...(existing as CatholicHubSongRecord),
+                title,
+                titleNormalized: normalizeTamilSearchText(title),
+                lyrics,
+                lyricsNormalized: normalizeTamilSearchText(lyrics),
+                contentHash,
+                order: index + 1,
+                lastSourceSeenAt: now,
+                lastSyncedAt: now,
+                updatedAt: now,
+                updatedBy: userId,
+                isArchived: false,
+                status: "active",
+              });
+            }
+          } else {
+            // New song — create record
+            totalCreated++;
+            toWrite.push({
+              id: makeCatholicHubSongId(category.categoryId, title, index + 1),
+              title,
+              titleNormalized: normalizeTamilSearchText(title),
+              category: category.categoryId,
+              categoryTamil: category.categoryTamil,
+              lyrics,
+              lyricsNormalized: normalizeTamilSearchText(lyrics),
+              contentHash,
+              language: "ta",
+              sourceUrl: link.sourceUrl,
+              sourcePageUrl: category.sourceUrl,
+              sourcePage: category.sourceUrl,
+              tags: [category.categoryTamil, category.categoryId],
+              order: index + 1,
+              status: "active",
+              isArchived: false,
+              isFeatured: false,
+              lastSourceSeenAt: now,
+              lastSyncedAt: now,
+              createdAt: now,
+              updatedAt: now,
+              createdBy: userId,
+              updatedBy: userId,
+              ...DEFAULT_TENANT_CONTEXT,
+            });
+          }
         } catch (error: any) {
           console.warn(`[Catholic Hub Songs] skipped "${link.title}":`, error?.message || error);
         }
       }
 
-      const batchSize = 450;
-      for (let i = 0; i < records.length; i += batchSize) {
-        const batch = db.batch();
-        for (const record of records.slice(i, i + batchSize)) {
-          const ref = db.collection("catholicHubSongs").doc(record.id);
-          const existing = await ref.get();
-          batch.set(ref, {
-            ...record,
-            createdAt: existing.exists ? existing.data()?.createdAt || record.createdAt : record.createdAt,
-            createdBy: existing.exists ? existing.data()?.createdBy || record.createdBy : record.createdBy,
-            isFeatured: existing.exists ? Boolean(existing.data()?.isFeatured) : record.isFeatured,
-            status: existing.exists ? (existing.data()?.status || record.status) : record.status,
+      // ── 4. Archive songs no longer on the source page ─────────────────────
+      let totalArchived = 0;
+      const archiveBatch = firestore.batch();
+      for (const [url, existing] of existingBySourceUrl.entries()) {
+        if (!seenSourceUrls.has(url) && existing.status !== "archived" && !existing.isArchived) {
+          totalArchived++;
+          const ref = firestore.collection("catholicHubSongs").doc(existing.id);
+          archiveBatch.set(ref, {
+            ...existing,
+            status: "archived",
+            isArchived: true,
+            updatedAt: now,
+            updatedBy: userId,
           }, { merge: true });
+        }
+      }
+      if (totalArchived > 0) await archiveBatch.commit();
+
+      // ── 5. Write new/updated songs in batches of 450 ──────────────────────
+      const BATCH_SIZE = 450;
+      for (let i = 0; i < toWrite.length; i += BATCH_SIZE) {
+        const batch = firestore.batch();
+        for (const record of toWrite.slice(i, i + BATCH_SIZE)) {
+          const ref = firestore.collection("catholicHubSongs").doc(record.id);
+          batch.set(ref, record, { merge: true });
         }
         await batch.commit();
       }
 
+      // ── 6. Update sync status ──────────────────────────────────────────────
       const syncDurationMs = Date.now() - startedAt;
-      const statusRecord: CatholicHubSongSyncStatusRecord = {
+      const successNow = new Date().toISOString();
+      const totalCreatedUpdated = totalCreated + totalUpdated;
+      await statusRef.set({
         categoryId: category.categoryId,
         categoryTamil: category.categoryTamil,
         sourceUrl: category.sourceUrl,
         status: "success",
-        lastSyncedAt: new Date().toISOString(),
-        lastSuccessAt: new Date().toISOString(),
-        totalSongsSynced: records.length,
+        lastSyncedAt: successNow,
+        lastSuccessAt: successNow,
+        totalFetched: links.length,
+        totalCreated,
+        totalUpdated,
+        totalUnchanged,
+        totalArchived,
+        totalSongsSynced: totalCreatedUpdated,
         syncDurationMs,
-      };
-      await statusRef.set(statusRecord, { merge: true });
-      synced.push({ categoryId: category.categoryId, totalSongsSynced: records.length, syncDurationMs });
+        nextScheduledSyncAt: nextSync,
+      } satisfies CatholicHubSongSyncStatusRecord, { merge: true });
+
+      synced.push({
+        categoryId: category.categoryId,
+        totalFetched: links.length,
+        totalCreated,
+        totalUpdated,
+        totalUnchanged,
+        totalArchived,
+        syncDurationMs,
+      });
+
+      console.log(
+        `[Catholic Hub Songs] ${category.categoryId}: +${totalCreated} new, ~${totalUpdated} updated, ` +
+        `=${totalUnchanged} unchanged, ✗${totalArchived} archived (${syncDurationMs}ms)`
+      );
     } catch (error: any) {
+      const failNow = new Date().toISOString();
       await statusRef.set({
         categoryId: category.categoryId,
         categoryTamil: category.categoryTamil,
         sourceUrl: category.sourceUrl,
         status: "failed",
-        lastSyncedAt: new Date().toISOString(),
-        lastFailureAt: new Date().toISOString(),
+        lastSyncedAt: failNow,
+        lastFailureAt: failNow,
         errorMessage: error?.message || "Sync failed.",
+        totalFetched: 0,
+        totalCreated: 0,
+        totalUpdated: 0,
+        totalUnchanged: 0,
+        totalArchived: 0,
         totalSongsSynced: 0,
         syncDurationMs: Date.now() - startedAt,
       } satisfies CatholicHubSongSyncStatusRecord, { merge: true });
@@ -981,7 +1138,16 @@ async function syncCatholicHubSongs(categoryId?: CatholicHubSongCategoryId | "al
     }
   }
 
-  return { categories: synced, totalSongsSynced: synced.reduce((sum, item) => sum + item.totalSongsSynced, 0) };
+  const totalCreated = synced.reduce((s, c) => s + c.totalCreated, 0);
+  const totalUpdated = synced.reduce((s, c) => s + c.totalUpdated, 0);
+  return {
+    categories: synced,
+    totalSongsSynced: totalCreated + totalUpdated,
+    totalCreated,
+    totalUpdated,
+    totalUnchanged: synced.reduce((s, c) => s + c.totalUnchanged, 0),
+    totalArchived: synced.reduce((s, c) => s + c.totalArchived, 0),
+  };
 }
 
 async function syncCatholicHubOnStartup() {
@@ -1080,6 +1246,12 @@ app.post("/api/bible/daily-readings/sync", requireFirebaseAuth, requireAdminRole
   }
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/catholic-hub/songs
+// Reads from Firestore ONLY — never triggers a source scrape.
+// The frontend now reads Firestore directly via the Firebase client SDK;
+// this endpoint is kept for admin tooling and backward compat.
+// ---------------------------------------------------------------------------
 app.get("/api/catholic-hub/songs", async (req, res) => {
   try {
     if (!admin.apps.length) {
@@ -1091,34 +1263,23 @@ app.get("/api/catholic-hub/songs", async (req, res) => {
     }
 
     const category = typeof req.query.category === "string" ? req.query.category : "all";
-    let query: FirebaseFirestore.Query = admin.firestore()
+    let firestoreQuery: FirebaseFirestore.Query = admin.firestore()
       .collection("catholicHubSongs")
       .where("status", "==", "active");
     if (category && category !== "all") {
-      query = query.where("category", "==", category);
+      firestoreQuery = firestoreQuery.where("category", "==", category);
     }
 
-    let snapshot = await query.limit(900).get();
-
-    // First public read after deployment should not leave users staring at an
-    // empty library. If the backend has Firebase Admin access but no synced
-    // records yet, populate Firestore once from the configured public sources.
-    if (snapshot.empty) {
-      try {
-        await syncCatholicHubSongs(category === "all" ? "all" : category as CatholicHubSongCategoryId, "system-lazy-sync");
-        snapshot = await query.limit(900).get();
-      } catch (error: any) {
-        console.warn("[Catholic Hub Songs] lazy sync failed:", error?.message || error);
-      }
-    }
+    // Read from Firestore only — no lazy sync here.
+    const snapshot = await firestoreQuery.limit(1500).get();
 
     const songs = snapshot.docs
       .map((doc) => decodeCatholicHubSongRecord(doc.data()))
       .sort((a: any, b: any) => {
-        const categorySort = String(a.category || "").localeCompare(String(b.category || ""));
-        if (categorySort !== 0) return categorySort;
-        return Number(a.order || 0) - Number(b.order || 0);
+        const catSort = String(a.category || "").localeCompare(String(b.category || ""));
+        return catSort !== 0 ? catSort : Number(a.order || 0) - Number(b.order || 0);
       });
+
     const statusSnapshot = await admin.firestore().collection("catholicHubSongSyncStatus").get();
 
     return res.json({
@@ -1128,7 +1289,7 @@ app.get("/api/catholic-hub/songs", async (req, res) => {
     });
   } catch {
     return res.status(502).json({
-      error: "Songs are not available yet. Please sync content or try again.",
+      error: "Songs could not be loaded from cache.",
     });
   }
 });
@@ -1136,8 +1297,19 @@ app.get("/api/catholic-hub/songs", async (req, res) => {
 app.post("/api/catholic-hub/songs/sync", requireFirebaseAuth, requireAdminRole, async (req, res) => {
   const requestedCategory = typeof req.body?.categoryId === "string" ? req.body.categoryId : "all";
   try {
-    const result = await syncCatholicHubSongs(requestedCategory as CatholicHubSongCategoryId | "all", (req as any).user?.uid || "admin-sync");
-    return res.json({ message: "Catholic Hub songs sync completed.", ...result });
+    const result = await syncCatholicHubSongs(
+      requestedCategory as CatholicHubSongCategoryId | "all",
+      (req as any).user?.uid || "admin-sync",
+    );
+    return res.json({
+      message: "Catholic Hub songs sync completed.",
+      totalCreated: result.totalCreated,
+      totalUpdated: result.totalUpdated,
+      totalUnchanged: result.totalUnchanged,
+      totalArchived: result.totalArchived,
+      totalSongsSynced: result.totalSongsSynced,
+      categories: result.categories,
+    });
   } catch (error: any) {
     return res.status(502).json({
       error: error?.message || "Catholic Hub songs sync failed.",
