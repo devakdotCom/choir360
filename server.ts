@@ -1258,8 +1258,6 @@ async function syncCatholicHubOnStartup() {
   }
 }
 
-  return aiInstance;
-}
 
 // -----------------------------------------------------------------------------
 // BACKEND API ROUTES
@@ -1877,4 +1875,100 @@ function startReadingsSchedule() {
  * Songs from radio.catholictamil.com — synced ONCE PER MONTH.
  * After a successful full sync the timestamp is stored in Firestore
  * (contentSyncStatus/songs-monthly). On each daily check we read that
- * document; if it is less than 30 days old we skip. This mean
+ * document; if it is less than 30 days old we skip. This means:
+ *   • Songs are never re-scraped more than once a month
+ *   • The stored data persists indefinitely — no data loss between deploys
+ *   • A manual "Sync all" from the admin UI bypasses the gate
+ */
+async function runMonthlySongSyncIfNeeded(userId = "system-monthly") {
+  if (!admin.apps.length) return;
+  const db = admin.firestore();
+  const statusRef = db.collection("contentSyncStatus").doc("songs-monthly");
+  try {
+    const snap = await statusRef.get();
+    if (snap.exists) {
+      const lastSuccess: string | undefined = snap.data()?.lastSuccessAt;
+      if (lastSuccess) {
+        const age = Date.now() - new Date(lastSuccess).getTime();
+        const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+        if (age < THIRTY_DAYS) {
+          const daysAgo = Math.floor(age / (24 * 60 * 60 * 1000));
+          console.log(`[Songs Monthly] last sync was ${daysAgo}d ago — skipping (next in ${30 - daysAgo}d).`);
+          return;
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn("[Songs Monthly] could not read sync status:", e?.message);
+  }
+
+  console.log("[Songs Monthly] starting full song sync for all 35 categories...");
+  try {
+    const result = await syncCatholicHubSongs("all", userId);
+    const totalSynced = result.totalSongsSynced;
+    await statusRef.set(
+      { lastSuccessAt: new Date().toISOString(), totalSongsSynced: totalSynced, syncedBy: userId },
+      { merge: true }
+    );
+    console.log(`[Songs Monthly] sync complete — ${totalSynced} songs across ${result.categories.length} categories.`);
+  } catch (e: any) {
+    console.warn("[Songs Monthly] sync failed:", e?.message);
+  }
+}
+
+function startCatholicHubSchedule() {
+  // Daily content (news/articles) sync at IST 03:00
+  scheduleDailyAt(3, "catholic-hub-content-0300", () => {
+    void syncCatholicHubContent("system-scheduled").then((r) =>
+      console.log(`[Catholic Hub] content sync done — ${r.itemsSynced} items in ${r.durationMs}ms`)
+    ).catch((e: any) =>
+      console.warn("[Catholic Hub] content sync failed:", e?.message)
+    );
+  });
+
+  // Monthly song sync check — runs daily at IST 04:00 but skips if < 30 days since last success
+  scheduleDailyAt(4, "songs-monthly-check-0400", () => {
+    void runMonthlySongSyncIfNeeded("system-monthly");
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER FREE-TIER KEEP-ALIVE
+// ─────────────────────────────────────────────────────────────────────────────
+function startKeepAlive() {
+  const selfUrl = process.env.RENDER_EXTERNAL_URL
+    || process.env.APP_URL?.replace("web.app", "onrender.com")
+    || null;
+
+  if (!selfUrl) {
+    console.log("[KeepAlive] RENDER_EXTERNAL_URL not set — skipping self-ping (local dev mode).");
+    return;
+  }
+
+  const pingUrl = `${selfUrl}/api/health`;
+  setInterval(async () => {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      await fetch(pingUrl, { signal: ctrl.signal });
+      clearTimeout(t);
+      console.log(`[KeepAlive] ping ok → ${pingUrl}`);
+    } catch {
+      // non-fatal — next ping will catch it
+    }
+  }, 10 * 60 * 1000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVER STARTUP
+// ─────────────────────────────────────────────────────────────────────────────
+const port = Number(process.env.PORT) || 3000;
+
+app.listen(port, () => {
+  console.log(`[Choir360 X] Server listening on port ${port}`);
+  startKeepAlive();
+  startReadingsSchedule();
+  void syncCatholicHubOnStartup();
+  startCatholicHubSchedule();
+  console.log("[Choir360 X] Sync schedulers started.");
+});
