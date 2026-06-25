@@ -449,13 +449,23 @@ export default function App() {
                 <MassManagement currentLang={currentLang} masses={masses} payments={payments} members={members}
                   onAddMass={(mass) => {
                     if (!guard.canAccess('choir_member')) {
-                      return Promise.resolve({ ok: false, error: 'Missing or insufficient permissions. Activate admin access first.' });
+                      return Promise.resolve({ ok: false, error: 'Missing or insufficient permissions.' });
                     }
                     return massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
                   }}
+                  onUpdateMass={(mass) => {
+                    if (!guard.isAdmin) {
+                      return Promise.resolve({ ok: false, error: 'Admin access required.' });
+                    }
+                    return massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
+                  }}
+                  onDeleteMass={(massId) => {
+                    if (!guard.isAdmin) return;
+                    void massSync.patch(massId, { status: 'deleted' } as any, authState.user?.uid);
+                  }}
                   onAddPayment={(payment) => {
                     if (!guard.isAdmin) {
-                      return Promise.resolve({ ok: false, error: 'Missing or insufficient permissions. Activate admin access first.' });
+                      return Promise.resolve({ ok: false, error: 'Admin access required.' });
                     }
                     return paymentSync.upsert({ ...payment, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
                   }}
@@ -513,8 +523,9 @@ export default function App() {
         </main>
       </div>
 
-      {/* MOBILE BOTTOM NAV */}
-      <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden" aria-label="Mobile bottom navigation">
+      {/* Mobile bottom nav */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-slate-200 bg-white lg:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {([
           { id: 'landing' as Tab,          Icon: LayoutDashboard, label: 'Home' },
           { id: 'bible' as Tab,             Icon: BookText,        label: 'Bible' },
@@ -523,8 +534,6 @@ export default function App() {
           { id: 'liturgical_planner' as Tab,Icon: Sparkles,        label: 'Plan' },
           { id: 'registration' as Tab,      Icon: UsersRound,      label: 'People' },
         ])
-          // Only show nav items the current user can actually open — no greyed-out
-          // placeholders for features gated behind a role the user doesn't have.
           .filter(({ id }) => guard.canAccess(TAB_REQUIRED_ROLE[id]))
           .map(({ id, Icon, label }) => {
             const isActive = activeTab === id;

@@ -8,6 +8,7 @@ import {
   type User,
 } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from '../services/firebase';
+import { apiFetch } from '../services/apiClient';
 import { Role } from '../types';
 
 export interface AuthClaims {
@@ -83,6 +84,14 @@ export function useFirebaseAuth() {
     setAuthError(null);
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      // Auto-sync role claims: server checks ADMIN_EMAILS and sets choir_admin or choir_member.
+      // Non-fatal — a backend outage should never block sign-in.
+      try {
+        await apiFetch('/api/auth/sync-role', { method: 'POST' });
+        await auth.currentUser?.getIdToken(true);
+      } catch {
+        // swallow sync errors
+      }
     } catch (error) {
       setAuthError(getFriendlyAuthError(error, 'Sign in failed. Please try again.'));
       throw error;
@@ -106,9 +115,6 @@ export function useFirebaseAuth() {
     await signOut(auth);
   };
 
-  // Forces a Firebase ID token refresh so newly set custom claims (role,
-  // tenantId, parishId, choirId) take effect immediately without sign-out.
-  // onIdTokenChanged fires on refresh and re-reads claims into state.
   const refreshToken = async (): Promise<void> => {
     if (auth?.currentUser) {
       await auth.currentUser.getIdToken(true);
