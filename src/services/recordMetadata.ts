@@ -2,10 +2,22 @@ import { RecordStatus, TenantScopedRecord } from '../types';
 
 const nowIso = () => new Date().toISOString();
 
-// Fallback IDs use 'global' so data is accessible to any parish without env vars set.
-// Set VITE_DEFAULT_TENANT_ID / VITE_DEFAULT_PARISH_ID / VITE_DEFAULT_CHOIR_ID in .env
-// to scope records to a specific parish from day one.
-export const DEFAULT_TENANT_CONTEXT = {
+// =============================================================================
+// Tenant context — resolved at runtime so every write carries the correct
+// parishId from the selected parish (not a hardcoded default).
+// =============================================================================
+export interface TenantContext {
+  tenantId: string;
+  parishId: string;
+  choirId: string;
+}
+
+/**
+ * Env-var fallback used when no parish has been selected yet (first-launch).
+ * Once the user selects a parish, pass its TenantContext explicitly to all
+ * write helpers so records land in the correct parish bucket.
+ */
+export const DEFAULT_TENANT_CONTEXT: TenantContext = {
   tenantId: import.meta.env.VITE_DEFAULT_TENANT_ID || 'global',
   parishId: import.meta.env.VITE_DEFAULT_PARISH_ID || 'global',
   choirId: import.meta.env.VITE_DEFAULT_CHOIR_ID || 'global-choir',
@@ -14,10 +26,11 @@ export const DEFAULT_TENANT_CONTEXT = {
 export function createRecordMetadata(
   userId = 'system',
   status: RecordStatus = 'active',
+  context: TenantContext = DEFAULT_TENANT_CONTEXT,
 ): TenantScopedRecord {
   const timestamp = nowIso();
   return {
-    ...DEFAULT_TENANT_CONTEXT,
+    ...context,
     createdAt: timestamp,
     updatedAt: timestamp,
     createdBy: userId,

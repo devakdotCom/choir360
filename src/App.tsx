@@ -4,16 +4,17 @@ import {
   HeartHandshake, LayoutDashboard, Menu, Music2, Search,
   Sparkles, Star, UserPlus, UsersRound, X, BookOpen, BookText,
 } from 'lucide-react';
-import { Announcement, ChoirEvent, Language, Mass, Member, MemberStatus, Payment, Role } from './types';
+import { Announcement, ChoirEvent, Language, Mass, Member, MemberStatus, Payment, Rehearsal, AttendanceRecord, Role } from './types';
 import { RoleSelector } from './components/RoleSelector';
 import { AuthPanel } from './components/AuthPanel';
 import { AccessDenied } from './components/AccessDenied';
-import { MOCK_ANNOUNCEMENTS, MOCK_EVENTS, MOCK_MASSES, MOCK_MEMBERS, MOCK_PAYMENTS } from './data/mockData';
+import { MOCK_ANNOUNCEMENTS, MOCK_EVENTS, MOCK_MASSES, MOCK_MEMBERS, MOCK_PAYMENTS, MOCK_REHEARSALS } from './data/mockData';
 import { useSyncedCollection } from './hooks/useSyncedCollection';
 import { useMembersWithPrivateData } from './hooks/useMembersWithPrivateData';
 import { useFirebaseAuth } from './hooks/useFirebaseAuth';
 import { useRoleGuard } from './hooks/useRoleGuard';
-import { createRecordMetadata } from './services/recordMetadata';
+import { createRecordMetadata, DEFAULT_TENANT_CONTEXT, type TenantContext } from './services/recordMetadata';
+import { ARCHDIOCESE_ID } from './data/madrasMylaporeParishes';
 import { ParishProvider } from './features/parish/ParishContext';
 import { ParishSidebarCard, ParishOnboardingModal } from './features/parish/ParishSelector';
 import { useParish } from './features/parish/ParishContext';
@@ -34,7 +35,8 @@ type Tab =
   | 'analytics'
   | 'catholic_hub'
   | 'liturgical_planner'
-  | 'gamification';
+  | 'gamification'
+  | 'rehearsals';
 
 const TAB_REQUIRED_ROLE: Record<Tab, Role> = {
   landing: 'public_user',
@@ -49,9 +51,12 @@ const TAB_REQUIRED_ROLE: Record<Tab, Role> = {
   ai_hub: 'choir_member',
   gamification: 'choir_member',
   analytics: 'choir_admin',
+  rehearsals: 'choir_member',
 };
 
 // ─── Lazy Imports ─────────────────────────────────────────────────────────────
+const RehearsalManager = React.lazy(() => import('./components/RehearsalManager').then((m) => ({ default: m.RehearsalManager })));
+
 const LandingPage = React.lazy(() => import('./components/LandingPage').then((m) => ({ default: m.LandingPage })));
 const MemberRegistration = React.lazy(() => import('./components/MemberRegistration').then((m) => ({ default: m.MemberRegistration })));
 const DashboardMember = React.lazy(() => import('./components/DashboardMember').then((m) => ({ default: m.DashboardMember })));
@@ -78,6 +83,7 @@ const navItems: { id: Tab; label: string; icon: React.ElementType; minRole: Role
   { id: 'liturgical_planner',  label: 'AI Mass Planner',  icon: Sparkles,        minRole: 'choir_member' },
   { id: 'gamification',        label: 'My Achievements',  icon: Star,            minRole: 'choir_member' },
   { id: 'analytics',           label: 'Insights',         icon: BarChart3,       minRole: 'choir_admin' },
+  { id: 'rehearsals',          label: 'Rehearsals',       icon: Music2,          minRole: 'choir_member' },
 ];
 
 const languages: { id: Language; label: string }[] = [
@@ -121,10 +127,25 @@ const BreadcrumbParishLabel: React.FC = () => {
   );
 };
 
-export default function App() {
+// AppInner lives inside <ParishProvider> so useParish() works.
+function AppInner() {
+  const { selectedParish, archdioceseId } = useParish();
+
+  // Build TenantContext from the selected parish; fall back to DEFAULT_TENANT_CONTEXT.
+  const tenantContext: TenantContext = React.useMemo(() => {
+    if (!selectedParish) return DEFAULT_TENANT_CONTEXT;
+    return {
+      tenantId: archdioceseId ?? ARCHDIOCESE_ID,
+      parishId: selectedParish.id,
+      choirId: `${selectedParish.id}-choir`,
+    };
+  }, [selectedParish, archdioceseId]);
+
+
   const [currentLang, setCurrentLang] = useState<Language>('en');
   const [activeTab, setActiveTab] = useState<Tab>('landing');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [demoRole, setDemoRole] = useState<Role>('choir_admin');
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [isSearchResultsOpen, setIsSearchResultsOpen] = useState(false);
@@ -142,15 +163,17 @@ export default function App() {
   const syncEnabled = Boolean(authState.user && !authState.user.isAnonymous);
 
   const { records: members, isLive: membersLive, syncError: membersSyncError, actions: memberSync } =
-    useMembersWithPrivateData(MOCK_MEMBERS, syncEnabled);
+    useMembersWithPrivateData(MOCK_MEMBERS, syncEnabled, tenantContext);
   const { records: masses, actions: massSync } =
-    useSyncedCollection<Mass>('masses', MOCK_MASSES, syncEnabled);
+    useSyncedCollection<Mass>('masses', MOCK_MASSES, syncEnabled, tenantContext);
   const { records: payments, actions: paymentSync } =
-    useSyncedCollection<Payment>('payments', MOCK_PAYMENTS, syncEnabled);
+    useSyncedCollection<Payment>('payments', MOCK_PAYMENTS, syncEnabled, tenantContext);
   const { records: events, actions: eventSync } =
-    useSyncedCollection<ChoirEvent>('events', MOCK_EVENTS, syncEnabled);
+    useSyncedCollection<ChoirEvent>('events', MOCK_EVENTS, syncEnabled, tenantContext);
   const { records: announcements } =
-    useSyncedCollection<Announcement>('announcements', MOCK_ANNOUNCEMENTS, syncEnabled);
+    useSyncedCollection<Announcement>('announcements', MOCK_ANNOUNCEMENTS, syncEnabled, tenantContext);
+  const { records: rehearsals, actions: rehearsalSync } =
+    useSyncedCollection<Rehearsal>('rehearsals', MOCK_REHEARSALS, syncEnabled, tenantContext);
 
   useEffect(() => {
     if (!authState.user && TAB_REQUIRED_ROLE[activeTab] !== 'public_user') {
@@ -161,6 +184,7 @@ export default function App() {
   const navigate = (tab: Tab) => {
     setActiveTab(tab);
     setMobileNavOpen(false);
+    setMobileMoreOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -260,9 +284,9 @@ export default function App() {
   const pendingCount = members.filter((m) => m.status === 'Pending').length;
 
   return (
-    <ParishProvider>
+    <>
     <ParishOnboardingModal />
-    <div className="min-h-[100dvh] bg-[#f6f7f5] text-slate-800">
+    <div className="min-h-[100dvh] overflow-x-hidden bg-[#f6f7f5] text-slate-800">
       {/* HEADER */}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#102d26] text-white">
         <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-4 px-4 sm:px-6">
@@ -442,7 +466,7 @@ export default function App() {
               <UnifiedCalendar currentLang={currentLang} masses={masses} events={events}
                 onAddEvent={(event) => {
                   if (!guard.isAdmin) return;
-                  void eventSync.upsert({ ...event, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
+                  void eventSync.upsert({ ...event, ...createRecordMetadata(authState.user?.uid ?? 'admin', 'active', tenantContext) }, authState.user?.uid);
                 }} />
             )}
             {activeTab === 'masses' && (
@@ -452,13 +476,13 @@ export default function App() {
                     if (!guard.canAccess('choir_member')) {
                       return Promise.resolve({ ok: false, error: 'Missing or insufficient permissions.' });
                     }
-                    return massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
+                    return massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin', 'active', tenantContext) }, authState.user?.uid);
                   }}
                   onUpdateMass={(mass) => {
                     if (!guard.isAdmin) {
                       return Promise.resolve({ ok: false, error: 'Admin access required.' });
                     }
-                    return massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
+                    return massSync.upsert({ ...mass, ...createRecordMetadata(authState.user?.uid ?? 'admin', 'active', tenantContext) }, authState.user?.uid);
                   }}
                   onDeleteMass={(massId) => {
                     if (!guard.isAdmin) return;
@@ -468,7 +492,7 @@ export default function App() {
                     if (!guard.isAdmin) {
                       return Promise.resolve({ ok: false, error: 'Admin access required.' });
                     }
-                    return paymentSync.upsert({ ...payment, ...createRecordMetadata(authState.user?.uid ?? 'admin') }, authState.user?.uid);
+                    return paymentSync.upsert({ ...payment, ...createRecordMetadata(authState.user?.uid ?? 'admin', 'active', tenantContext) }, authState.user?.uid);
                   }}
                   onUpdatePayment={(id, receivedAmount, status) => {
                     if (!guard.isAdmin) return;
@@ -479,7 +503,7 @@ export default function App() {
             )}
             {activeTab === 'registration' && (
               <MemberRegistration currentLang={currentLang} currentUserRole={effectiveRole} members={members}
-                onAddMember={(member) => void memberSync.upsert({ ...member, ...createRecordMetadata(authState.user?.uid ?? 'public_user', 'Pending') }, authState.user?.uid)}
+                onAddMember={(member) => void memberSync.upsert({ ...member, ...createRecordMetadata(authState.user?.uid ?? 'public_user', 'Pending', tenantContext) }, authState.user?.uid)}
                 onUpdateMemberStatus={handleUpdateMemberStatus} />
             )}
             {activeTab === 'dashboard_member' && (
@@ -487,7 +511,7 @@ export default function App() {
                 currentMember ? (
                   <DashboardMember currentLang={currentLang} memberId={authState.user?.uid ?? currentMember.id}
                     members={members} events={events} masses={masses}
-                    onUpdateMemberDetails={(updated) => void memberSync.upsert({ ...updated, ...createRecordMetadata(authState.user?.uid ?? updated.id, updated.status) }, authState.user?.uid)}
+                    onUpdateMemberDetails={(updated) => void memberSync.upsert({ ...updated, ...createRecordMetadata(authState.user?.uid ?? updated.id, updated.status, tenantContext) }, authState.user?.uid)}
                     onUpdateEventRsvp={(eventId, memberId, status) => {
                       const event = events.find((item) => item.id === eventId);
                       if (event) void eventSync.patch(eventId, { rsvps: { ...event.rsvps, [memberId]: status } }, authState.user?.uid);
@@ -513,6 +537,18 @@ export default function App() {
                 <LiturgicalPlanner />
               ) : <AccessDenied requiredRole="choir_member" />
             )}
+            {activeTab === 'rehearsals' && (
+              guard.canAccess('choir_member') ? (
+                <RehearsalManager
+                  rehearsals={rehearsals}
+                  members={members}
+                  isAdmin={guard.isAdmin}
+                  onAddRehearsal={(r) => void rehearsalSync.upsert({ ...r, ...createRecordMetadata(authState.user?.uid ?? 'admin', 'active', tenantContext) }, authState.user?.uid)}
+                  onUpdateRehearsal={(r) => void rehearsalSync.upsert({ ...r, ...createRecordMetadata(authState.user?.uid ?? 'admin', 'active', tenantContext) }, authState.user?.uid)}
+                  onMarkAttendance={(_rec: AttendanceRecord) => { /* TODO: persist to attendance collection */ }}
+                />
+              ) : <AccessDenied requiredRole="choir_member" />
+            )}
             {activeTab === 'gamification' && (
               guard.canAccess('choir_member') ? (
                 currentMember ? (
@@ -524,17 +560,55 @@ export default function App() {
         </main>
       </div>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — 5 primary tabs + More drawer */}
+      {mobileMoreOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setMobileMoreOpen(false)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div
+            className="absolute bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 rounded-t-2xl border-t border-slate-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">More</span>
+              <button onClick={() => setMobileMoreOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-1 p-3">
+              {([
+                { id: 'bible' as Tab,             Icon: BookText,       label: 'Bible' },
+                { id: 'catholic_hub' as Tab,       Icon: BookOpen,       label: 'Catholic' },
+                { id: 'rehearsals' as Tab,         Icon: Sparkles,       label: 'Rehearsals' },
+                { id: 'dashboard_member' as Tab,   Icon: HeartHandshake, label: 'Ministry' },
+                { id: 'liturgical_planner' as Tab, Icon: Star,           label: 'Planner' },
+                { id: 'ai_hub' as Tab,             Icon: Command,        label: 'AI Hub' },
+                { id: 'analytics' as Tab,          Icon: BarChart3,      label: 'Insights' },
+              ] as { id: Tab; Icon: React.ElementType; label: string }[])
+                .filter(({ id }) => guard.canAccess(TAB_REQUIRED_ROLE[id]))
+                .map(({ id, Icon, label }) => {
+                  const isActive = activeTab === id;
+                  return (
+                    <button key={id} onClick={() => { navigate(id); setMobileMoreOpen(false); }}
+                      className={'flex flex-col items-center gap-1 rounded-xl p-3 min-h-[64px] ' + (isActive ? 'bg-[#18392f]/10' : 'hover:bg-slate-50')}>
+                      <Icon className={'h-5 w-5 ' + (isActive ? 'text-[#18392f]' : 'text-slate-500')} />
+                      <span className={'text-[9px] font-bold ' + (isActive ? 'text-[#18392f]' : 'text-slate-500')}>{label}</span>
+                    </button>
+                  );
+                })}
+            </div>
+            <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }} />
+          </div>
+        </div>
+      )}
       <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-slate-200 bg-white lg:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {([
-          { id: 'landing' as Tab,          Icon: LayoutDashboard, label: 'Home' },
-          { id: 'bible' as Tab,             Icon: BookText,        label: 'Bible' },
-          { id: 'song_library' as Tab,      Icon: Music2,          label: 'Songs' },
-          { id: 'catholic_hub' as Tab,      Icon: BookOpen,        label: 'Catholic' },
-          { id: 'liturgical_planner' as Tab,Icon: Sparkles,        label: 'Plan' },
-          { id: 'registration' as Tab,      Icon: UsersRound,      label: 'People' },
-        ])
+          { id: 'landing' as Tab,      Icon: LayoutDashboard, label: 'Home' },
+          { id: 'calendar' as Tab,     Icon: CalendarDays,    label: 'Calendar' },
+          { id: 'masses' as Tab,       Icon: Church,          label: 'Masses' },
+          { id: 'song_library' as Tab, Icon: Music2,          label: 'Songs' },
+          { id: 'registration' as Tab, Icon: UsersRound,      label: 'People' },
+        ] as { id: Tab; Icon: React.ElementType; label: string }[])
           .filter(({ id }) => guard.canAccess(TAB_REQUIRED_ROLE[id]))
           .map(({ id, Icon, label }) => {
             const isActive = activeTab === id;
@@ -543,15 +617,30 @@ export default function App() {
                 className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 min-h-[56px]"
                 aria-current={isActive ? 'page' : undefined}>
                 <Icon className={'h-5 w-5 ' + (isActive ? 'text-[#18392f]' : 'text-slate-400')} />
-                <span className={'text-[9px] font-bold ' + (isActive ? 'text-[#18392f]' : 'text-slate-400')}>
-                  {label}
-                </span>
+                <span className={'text-[9px] font-bold ' + (isActive ? 'text-[#18392f]' : 'text-slate-400')}>{label}</span>
               </button>
             );
           })}
+        {/* More button */}
+        <button onClick={() => setMobileMoreOpen((o) => !o)}
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 min-h-[56px]">
+          <Menu className={'h-5 w-5 ' + (mobileMoreOpen ? 'text-[#18392f]' : 'text-slate-400')} />
+          <span className={'text-[9px] font-bold ' + (mobileMoreOpen ? 'text-[#18392f]' : 'text-slate-400')}>More</span>
+        </button>
       </nav>
       <div className="h-[calc(56px+env(safe-area-inset-bottom))] lg:hidden" aria-hidden="true" />
     </div>
+    </>
+  );
+}
+
+// =============================================================================
+// App — root export. Wraps AppInner in ParishProvider so useParish() works.
+// =============================================================================
+export default function App() {
+  return (
+    <ParishProvider>
+      <AppInner />
     </ParishProvider>
   );
 }

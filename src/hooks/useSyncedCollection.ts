@@ -5,6 +5,7 @@ import {
   upsertTenantRecord,
   updateTenantRecord,
 } from '../services/firebase';
+import { TenantContext } from '../services/recordMetadata';
 import { TenantScopedRecord } from '../types';
 
 type CollectionKey = Parameters<typeof listenToTenantCollection>[0];
@@ -13,6 +14,7 @@ export function useSyncedCollection<T extends { id: string }>(
   collectionName: CollectionKey,
   fallbackRecords: T[],
   syncEnabled = true,
+  tenantContext?: TenantContext,
 ) {
   const [records, setRecords] = useState<T[]>(fallbackRecords);
   const [isLive, setIsLive] = useState(false);
@@ -21,6 +23,11 @@ export function useSyncedCollection<T extends { id: string }>(
   const recordsRef = useRef(records);
   useEffect(() => { recordsRef.current = records; }, [records]);
 
+  // Stable string key from tenant context — triggers re-subscription when parish changes.
+  const contextKey = tenantContext
+    ? `${tenantContext.tenantId}::${tenantContext.parishId}::${tenantContext.choirId}`
+    : 'default';
+
   useEffect(() => {
     if (!isFirebaseConfigured || !syncEnabled) {
       setRecords(fallbackRecords);
@@ -28,17 +35,26 @@ export function useSyncedCollection<T extends { id: string }>(
       setSyncError(null);
       return;
     }
+    // Flush stale parish data immediately so the UI never shows records from a
+    // previous parish while the new subscription is still connecting.
+    setRecords([]);
+    setIsLive(false);
+
     const unsubscribe = listenToTenantCollection<T>(
       collectionName,
       (items) => { setRecords(items); setIsLive(true); setSyncError(null); },
       (error) => { setSyncError(error.message); setIsLive(false); },
+      [],
+      50,
+      tenantContext,
     );
     return unsubscribe;
+    // contextKey encodes all tenant fields; adding it here makes the effect
+    // re-run whenever the user switches parish.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collectionName, syncEnabled]);
+  }, [collectionName, syncEnabled, contextKey]);
 
-  // Insert or replace a record. Returns { ok: true } on success or
-  // { ok: false, error } on Firestore rejection so callers can show the error.
+  // Insert or replace a record.
   const upsert = useCallback(
     async (record: T & Partial<TenantScopedRecord>, userId?: string): Promise<{ ok: boolean; error?: string }> => {
       const prev = recordsRef.current;
@@ -58,8 +74,7 @@ export function useSyncedCollection<T extends { id: string }>(
     [collectionName, syncEnabled],
   );
 
-  // Patch existing record fields. Returns { ok: true } on success or
-  // { ok: false, error } on Firestore rejection.
+  // Patch existing record fields.
   const patch = useCallback(
     async (recordId: string, patchData: Partial<T & TenantScopedRecord>, userId?: string): Promise<{ ok: boolean; error?: string }> => {
       const prev = recordsRef.current;

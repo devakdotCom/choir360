@@ -1,4 +1,4 @@
-import { Member, Mass, Payment, ChoirEvent, Song, Announcement, SaintOfDay, Language } from '../types';
+import { Member, Mass, Payment, ChoirEvent, Song, Announcement, SaintOfDay, Language, Rehearsal } from '../types';
 
 export const MULTILINGUAL_DICTIONARY: Record<Language, Record<string, string>> = {
   en: {
@@ -310,6 +310,7 @@ export const MOCK_PAYMENTS: Payment[] = [];
 export const MOCK_EVENTS: ChoirEvent[] = [];
 export const MOCK_SONGS: Song[] = [];
 export const MOCK_ANNOUNCEMENTS: Announcement[] = [];
+export const MOCK_REHEARSALS: Rehearsal[] = [];
 
 export const INDIAN_RC_HOLIDAYS_2026 = [
   { date: '2026-06-29', name: 'Solemnity of St. Peter & St. Paul (RC Festival)' },

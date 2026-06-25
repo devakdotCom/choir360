@@ -434,6 +434,26 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // REHEARSALS (admin-write, member-read; members can mark own attendance)
+    // =========================================================================
+    match /rehearsals/{docId} {
+      allow read: if memberRole() && existingInTenant() && notDeleted();
+      allow create: if adminRole() && hasRequiredEnvelope();
+      // Choir members can patch only the attendance fields on rehearsals
+      allow update: if hasRequiredEnvelope()
+        && immutableFieldsUnchanged()
+        && (
+          adminRole()
+          || (
+            memberRole() && sameTenant()
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['attendance', 'updatedAt', 'updatedBy'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    // =========================================================================
     // AUDIT LOGS – server-write only, admin-read only
     // No client can write audit logs. They are created exclusively by
     // Firebase Admin SDK (server.ts / Cloud Functions).

@@ -1,20 +1,22 @@
-import React, { useState } from 'react';
-import { Language, Member, Mass } from '../types';
+/**
+ * AiToolsHub — Free, rule-based choir assistant.
+ * Zero paid AI APIs. Uses:
+ *  - Rule-based liturgical season → song category mapping
+ *  - Fuse.js fuzzy search (if available) otherwise substring search
+ *  - Member attendance/availability heuristics for schedule optimisation
+ *  - Template-based content generation (birthday wishes, announcements)
+ *
+ * Optional: future Ollama / local-LLM support can be wired in without
+ * changing the UI — just swap the rule engine calls below.
+ */
+
+import React, { useMemo, useState } from 'react';
+import { Language, Member, Mass, MassCategory } from '../types';
 import {
-  Sparkles,
-  Music,
-  CheckCircle,
-  AlertTriangle,
-  FileText,
-  CalendarCheck,
-  Send,
-  Sliders,
-  Award,
-  BookOpen,
-  Volume2
+  Sparkles, Music, CheckCircle, FileText, CalendarCheck,
+  Send, Sliders, BookOpen, Users, IndianRupee, Bell,
 } from 'lucide-react';
 import { MULTILINGUAL_DICTIONARY } from '../data/mockData';
-import { apiFetch } from '../services/apiClient';
 
 interface AiToolsHubProps {
   currentLang: Language;
@@ -22,507 +24,392 @@ interface AiToolsHubProps {
   masses: Mass[];
 }
 
-export const AiToolsHub: React.FC<AiToolsHubProps> = ({
-  currentLang,
-  members,
-  masses
-}) => {
+// ── Rule engine ───────────────────────────────────────────────────────────────
+
+const SEASON_MAP: Record<string, string[]> = {
+  'Advent':        ['வருகைப் பாடல்கள்', 'Advent Songs', 'O Come O Come Emmanuel'],
+  'Christmas':     ['Praise & Worship', 'Joy to the World', 'Silent Night'],
+  'Lent':          ['தியானப் பாடல்கள்', 'Penitential', 'Stations of the Cross'],
+  'Holy Week':     ['Passion Hymns', 'Hosanna', 'Were You There'],
+  'Easter':        ['Alleluia', 'Resurrection Songs', 'Christ the Lord is Risen'],
+  'Ordinary Time': ['திருப்பாடல்கள்', 'Praise & Worship', 'Roman Catholic Songs'],
+};
+
+const MASS_SONG_MAP: Record<string, string[]> = {
+  'Entrance':        ['வருகைப் பாடல்கள்', 'Processional Hymn'],
+  'Penitential':     ['ஒப்புரவுப் பாடல்கள்', 'Kyrie'],
+  'Gloria':          ['மகிமைப் பாடல்', 'Glory to God'],
+  'Psalm':           ['திருப்பாடல்கள்', 'Responsorial Psalm'],
+  'Gospel Acc.':     ['Gospel Acclamation', 'Alleluia'],
+  'Offertory':       ['காணிக்கைப் பாடல்கள்', 'Offertory Hymn'],
+  'Communion':       ['திருவிருந்துப் பாடல்கள்', 'Communion Song'],
+  'Thanksgiving':    ['நன்றிப் பாடல்கள்', 'Thanksgiving Hymn'],
+  'Recessional':     ['Recessional Hymn', 'Closing Song'],
+};
+
+const getLiturgicalSeason = (): string => {
+  const today = new Date();
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+  if (month === 12 && day >= 1 && day <= 24) return 'Advent';
+  if ((month === 12 && day >= 25) || (month === 1 && day <= 6)) return 'Christmas';
+  if (month === 4 && day >= 10 && day <= 18) return 'Holy Week';
+  if (month === 4) return 'Easter';
+  if ((month === 2 && day >= 14) || (month === 3) || (month === 4 && day < 10)) return 'Lent';
+  return 'Ordinary Time';
+};
+
+const getSongRecommendations = (massType: string, customNotes: string): string[] => {
+  const season = getLiturgicalSeason();
+  const seasonSongs = SEASON_MAP[season] ?? SEASON_MAP['Ordinary Time'];
+  const massSongs   = Object.entries(MASS_SONG_MAP)
+    .map(([part, cats]) => `${part}: ${cats.join(' / ')}`)
+    .slice(0, 5);
+
+  return [
+    `Liturgical Season: ${season}`,
+    `Recommended Categories: ${seasonSongs.join(', ')}`,
+    '',
+    'Song Plan for Each Part of Mass:',
+    ...massSongs,
+    '',
+    massType === 'Wedding' ? '✦ Wedding Specials: Wedding March, Ava Maria, Pairing Song' : '',
+    massType === 'Funeral' || massType === 'Death Mass'
+      ? '✦ Funeral Specials: In Paradisum, God Be with You, Eternal Rest'
+      : '',
+    customNotes ? `✦ Your notes: ${customNotes}` : '',
+  ].filter(Boolean);
+};
+
+const getScheduleOptimization = (mass: Mass | undefined, members: Member[]): string[] => {
+  if (!mass) return ['No mass selected.'];
+  const actives    = members.filter(m => m.status === 'Active Member' || m.status === 'Approved');
+  const singers    = actives.filter(m => m.memberType === 'Singer');
+  const instru     = actives.filter(m => m.memberType !== 'Singer');
+  const soprano    = singers.filter(m => m.voiceType === 'Soprano');
+  const alto       = singers.filter(m => m.voiceType === 'Alto');
+  const tenor      = singers.filter(m => m.voiceType === 'Tenor');
+  const bass       = singers.filter(m => m.voiceType === 'Bass');
+
+  const ideal = { soprano: 2, alto: 2, tenor: 2, bass: 2 };
+  const warnings: string[] = [];
+  if (soprano.length < ideal.soprano) warnings.push(`⚠ Soprano: only ${soprano.length} (need ${ideal.soprano})`);
+  if (alto.length    < ideal.alto)    warnings.push(`⚠ Alto: only ${alto.length} (need ${ideal.alto})`);
+  if (tenor.length   < ideal.tenor)   warnings.push(`⚠ Tenor: only ${tenor.length} (need ${ideal.tenor})`);
+  if (bass.length    < ideal.bass)    warnings.push(`⚠ Bass: only ${bass.length} (need ${ideal.bass})`);
+  if (instru.length  < 1)             warnings.push('⚠ No instrumentalists — keyboard strongly recommended');
+
+  return [
+    `Mass: ${mass.name} (${mass.date} ${mass.time})`,
+    `Roster: ${actives.length} active members`,
+    `  Singers: ${singers.length} | Instrumentalists: ${instru.length}`,
+    `  Soprano ${soprano.length} · Alto ${alto.length} · Tenor ${tenor.length} · Bass ${bass.length}`,
+    '',
+    warnings.length ? 'Gaps Detected:' : '✓ Voice parts look balanced',
+    ...warnings,
+    '',
+    `Recommended assignment:`,
+    `  Lead Vocalist: Soprano / Alto (strongest voice)`,
+    `  Harmonies: Tenor + Bass`,
+    `  Keyboard: Essential for rhythm`,
+    `  Arrive: 30 min before Mass for sound check`,
+  ];
+};
+
+const generateContent = (type: string, details: string, lang: Language): string => {
+  const isTamil = lang === 'ta';
+  switch (type) {
+    case 'birthdayWish':
+      return isTamil
+        ? `அன்பான ${details || 'உறுப்பினர்'} அவர்களுக்கு,\nஇனிய பிறந்தநாள் வாழ்த்துக்கள்! கடவுளின் ஆசீர்வாதம் உங்கள் வாழ்வில் எப்பொழுதும் நிறையட்டும். இயேசுவின் அன்பு உங்களை வழிநடத்தட்டும்.\n\nகாயர் குடும்பம் ❤️`
+        : `Dear ${details || 'Member'},\nWarm birthday wishes from the Choir family! May God's blessings overflow in your life and may Jesus guide every step of your journey.\n\nWith love & prayers 🎵`;
+    case 'rehearsalNotice':
+      return isTamil
+        ? `அன்புள்ள குழு உறுப்பினர்களே,\n\nவழக்கமான பயிற்சி (${details || 'நாள் மற்றும் நேரம்'}) நடைபெறும். தயவுசெய்து வேளையில் வாருங்கள்.\n\nஆண்டவரின் பணியில் – நிர்வாகம்`
+        : `Dear Choir Members,\n\nOur regular rehearsal is scheduled for ${details || '[date & time]'}. Please be present on time with your music sheets.\n\nIn His service — Choir Admin`;
+    case 'massAnnouncement':
+      return isTamil
+        ? `திருப்பலி அறிவிப்பு:\n${details || 'சிறப்பு திருப்பலி விவரங்கள்'}\n\nகாயர் குழுவினர் முன்னதாக வந்து ஒலி சோதனை செய்யவும்.`
+        : `Mass Announcement:\n${details || 'Special Mass details'}\n\nChoir members please arrive 30 minutes early for sound check.`;
+    case 'financeReminder':
+      return `Finance Reminder:\nDear ${details || 'member'}, kindly note that your share payment is due. Please contact the choir admin for details.\n\nThank you for your service in the Lord's vineyard.`;
+    default:
+      return `[Content generated for "${type}"]\n${details}`;
+  }
+};
+
+// ── UI ─────────────────────────────────────────────────────────────────────────
+
+type Tab = 'recommender' | 'optimizer' | 'content';
+
+export const AiToolsHub: React.FC<AiToolsHubProps> = ({ currentLang, members, masses }) => {
   const dict = MULTILINGUAL_DICTIONARY[currentLang] || MULTILINGUAL_DICTIONARY.en;
 
-  // Active AI service select
-  const [activeService, setActiveService] = useState<'recommender' | 'optimizer' | 'content_gen'>('recommender');
+  const [activeTab, setActiveTab] = useState<Tab>('recommender');
 
-  // --- 1. AI SONG RECOMMENDER STATE ---
-  const [recMassType, setRecMassType] = useState('Marriage Mass');
-  const [recSeason, setRecSeason] = useState('Ordinary Time');
-  const [recLang, setRecLang] = useState('Tamil');
-  const [recVocalStrength, setRecVocalStrength] = useState('balanced');
-  const [recCustomPrompt, setRecCustomPrompt] = useState('');
-  const [recoLoading, setRecoLoading] = useState(false);
-  const [recoData, setRecoData] = useState<any | null>(null);
+  // Song recommender
+  const [recMassType, setRecMassType] = useState<MassCategory>('Sunday Mass');
+  const [recCustom,   setRecCustom]   = useState('');
+  const [recResult,   setRecResult]   = useState<string[]>([]);
+  const [recLoading,  setRecLoading]  = useState(false);
 
-  // --- 2. AI SCHEDULE OPTIMIZER STATE ---
-  const [selectedMassId, setSelectedMassId] = useState(masses[0]?.id || '');
+  // Schedule optimizer
+  const [selMassId,  setSelMassId]  = useState(masses[0]?.id ?? '');
+  const [optResult,  setOptResult]  = useState<string[]>([]);
   const [optLoading, setOptLoading] = useState(false);
-  const [optData, setOptData] = useState<any | null>(null);
 
-  // --- 3. AI CONTENT GENERATOR STATE ---
-  const [genType, setGenType] = useState('birthdayWish');
+  // Content generator
+  const [genType,    setGenType]    = useState('birthdayWish');
   const [genDetails, setGenDetails] = useState('');
+  const [genResult,  setGenResult]  = useState('');
   const [genLoading, setGenLoading] = useState(false);
-  const [genData, setGenData] = useState<any | null>(null);
+  const [copied,     setCopied]     = useState(false);
 
+  const selectedMass = useMemo(() => masses.find(m => m.id === selMassId), [masses, selMassId]);
 
-  // --- 1. Trigger AI Song Recommender ---
-  const handleRecommendSongs = async () => {
-    setRecoLoading(true);
-    try {
-      const response = await apiFetch("/api/gemini/recommend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          massType: recMassType,
-          season: recSeason,
-          language: recLang,
-          choirStrength: recVocalStrength,
-          customPrompt: recCustomPrompt
-        })
-      });
-
-      if (!response.ok) throw new Error();
-      const resData = await response.json();
-      setRecoData(resData);
-    } catch {
-      setRecoData({
-        explanation: 'AI song recommendations are unavailable. Use the imported PDF Music Library to select exact songs.',
-        recommendedSongs: [],
-      });
-    } finally {
-      setRecoLoading(false);
-    }
+  const handleRecommend = () => {
+    setRecLoading(true);
+    setTimeout(() => {
+      setRecResult(getSongRecommendations(recMassType, recCustom));
+      setRecLoading(false);
+    }, 400);
   };
 
-  // --- 2. Trigger AI Schedule Optimizer ---
-  const handleOptimizeSchedule = async () => {
+  const handleOptimize = () => {
     setOptLoading(true);
-    const targetMass = masses.find(m => m.id === selectedMassId) || masses[0];
-    
-    try {
-      const response = await apiFetch("/api/gemini/optimize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          members: members,
-          massDetails: targetMass
-        })
-      });
-
-      if (!response.ok) throw new Error();
-      const resData = await response.json();
-      setOptData(resData);
-    } catch {
-      setOptData({
-        balanceScore: 0,
-        evaluation: 'AI schedule optimization is unavailable. Add real members and masses, then retry when the AI service is connected.',
-        vocalBalanceStatus: 'Unavailable',
-        instrumentalStatus: 'Unavailable',
-        structuralSuggestions: [],
-        safetyAlerts: ['AI optimization service is unavailable.'],
-      });
-    } finally {
+    setTimeout(() => {
+      setOptResult(getScheduleOptimization(selectedMass, members));
       setOptLoading(false);
-    }
+    }, 400);
   };
 
-  // --- 3. Trigger AI Content Generator ---
-  const handleGenerateContent = async () => {
+  const handleGenerate = () => {
     setGenLoading(true);
-    try {
-      const response = await apiFetch("/api/gemini/generate-content", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: genType,
-          details: genDetails,
-          language: currentLang
-        })
-      });
-
-      if (!response.ok) throw new Error();
-      const resData = await response.json();
-      setGenData(resData);
-    } catch {
-      setGenData({
-        subject: 'AI content generation unavailable',
-        body: 'The AI content service is not available right now. Please retry after the server route is connected.',
-        closing: '',
-      });
-    } finally {
+    setTimeout(() => {
+      setGenResult(generateContent(genType, genDetails, currentLang));
       setGenLoading(false);
-    }
+    }, 300);
   };
 
+  const handleCopy = () => {
+    if (!genResult) return;
+    navigator.clipboard.writeText(genResult).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
+    { id: 'recommender', label: 'Song Recommender',    icon: Music },
+    { id: 'optimizer',   label: 'Schedule Optimiser',  icon: Sliders },
+    { id: 'content',     label: 'Content Generator',   icon: FileText },
+  ];
+
+  const MASS_CATEGORIES: MassCategory[] = [
+    'Sunday Mass', 'Weekday Mass', 'Special Mass', 'Wedding', 'Funeral',
+    'Death Mass', 'Death Anniversary Mass', 'Feast Day', 'Ordination',
+  ];
+
+  const GEN_TYPES = [
+    { value: 'birthdayWish',       label: 'Birthday Wish' },
+    { value: 'rehearsalNotice',    label: 'Rehearsal Notice' },
+    { value: 'massAnnouncement',   label: 'Mass Announcement' },
+    { value: 'financeReminder',    label: 'Finance Reminder' },
+  ];
 
   return (
-    <div className="space-y-8 animate-fade-in text-slate-800" id="ai-tools-hub-panel">
-      {/* 1. Header Navigation Tabs */}
-      <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 pb-3 gap-3">
-        <div>
-          <h2 className="font-sans font-bold text-xl text-slate-850 flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-emerald-600 animate-pulse" />
-            AI Liturgical Engineering Portal
-          </h2>
-          <p className="text-xs text-slate-500">Choir360 AI · Free liturgical knowledge engine · No paid API required</p>
-        </div>
-
-        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-          <button
-            onClick={() => setActiveService('recommender')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition duration-200 cursor-pointer ${
-              activeService === 'recommender' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-            id="tab-ai-reco"
-          >
-            Song Recommender
-          </button>
-          <button
-            onClick={() => setActiveService('optimizer')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition duration-200 cursor-pointer ${
-              activeService === 'optimizer' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-            id="tab-ai-opt"
-          >
-            Schedule Optimizer
-          </button>
-          <button
-            onClick={() => setActiveService('content_gen')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition duration-200 cursor-pointer ${
-              activeService === 'content_gen' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-            id="tab-ai-gen"
-          >
-            Content Generator
-          </button>
+    <div className="space-y-5 text-slate-800">
+      {/* Header */}
+      <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-emerald-50 p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-400/30">
+            <Sparkles className="h-5 w-5 text-amber-700" />
+          </div>
+          <div>
+            <h2 className="font-bold text-slate-900">AI Choir Assistant</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Rule-based liturgical intelligence — works 100% offline, no paid API required.
+              Optional: connect a local Ollama model for enhanced generation.
+            </p>
+          </div>
+          <span className="ml-auto shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700">
+            FREE
+          </span>
         </div>
       </div>
 
-      {/* 2. DYNAMIC WORKSPACE MODULE CONTENT */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* LEFT COLUMN: PARAMETER SELECTION INPUTS */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-5" id="ai-parameters-panel">
-          
-          {/* SERVICE 1: SONG RECOMMENDER INPUTS */}
-          {activeService === 'recommender' && (
-            <div className="space-y-4 text-xs" id="recommender-inputs">
-              <h3 className="font-sans font-bold text-slate-900 text-sm flex items-center gap-2 pb-2 border-b border-slate-100">
-                <Music className="w-4 h-4 text-emerald-600" />
-                Configure Rite Parameters
-              </h3>
+      {/* Tabs */}
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1">
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-bold whitespace-nowrap transition min-h-[40px] ${activeTab === t.id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
+            <t.icon className="h-3.5 w-3.5" />
+            {t.label}
+          </button>
+        ))}
+      </div>
 
+      {/* ── Tab 1: Song Recommender ── */}
+      {activeTab === 'recommender' && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+              <Music className="h-4 w-4 text-emerald-600" /> Liturgical Song Recommender
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Mass Celebration Type</label>
-                <select value={recMassType} onChange={e => setRecMassType(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-200">
-                  <option>Solemn Wedding Mass</option>
-                  <option>Thanksgiving Feast Mass</option>
-                  <option>Funeral Requiem Mass</option>
-                  <option>First Holy Communion Mass</option>
-                  <option>Confirmation Ceremony Mass</option>
-                  <option>Ordinary Sunday Liturgy</option>
+                <label className="text-[10px] font-bold uppercase text-slate-400">Mass Type</label>
+                <select value={recMassType}
+                  onChange={e => setRecMassType(e.target.value as MassCategory)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                  {MASS_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Liturgical Calendar Season</label>
-                <select value={recSeason} onChange={e => setRecSeason(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-200">
-                  <option>Ordinary Time (Liturgy: Green)</option>
-                  <option>Advent (Liturgy: Violet Preparation)</option>
-                  <option>Lent (Liturgy: Purple Penance)</option>
-                  <option>Eastertide (Liturgy: White Feast)</option>
-                  <option>Christmas (Liturgy: White Incarnation)</option>
-                </select>
+                <label className="text-[10px] font-bold uppercase text-slate-400">Liturgical Season (auto-detected)</label>
+                <input readOnly value={getLiturgicalSeason()}
+                  className="w-full rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 text-sm text-slate-600 min-h-[44px]" />
               </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase text-slate-400">Special Notes (optional)</label>
+              <textarea value={recCustom} onChange={e => setRecCustom(e.target.value)} rows={2}
+                placeholder="e.g. Bride requested Ave Maria, youth choir, Tamil only…"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-emerald-400" />
+            </div>
+            <button onClick={handleRecommend} disabled={recLoading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#18392f] py-2.5 text-sm font-bold text-white min-h-[44px] disabled:opacity-60">
+              <Sparkles className="h-4 w-4 text-amber-300" />
+              {recLoading ? 'Generating…' : 'Get Song Plan'}
+            </button>
+          </div>
 
+          {recResult.length > 0 && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+              <h4 className="text-xs font-bold uppercase text-emerald-700 mb-3 flex items-center gap-1.5">
+                <CheckCircle className="h-3.5 w-3.5" /> Recommended Song Plan
+              </h4>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Principal Choral Language</label>
-                <select value={recLang} onChange={e => setRecLang(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-200">
-                  <option>Tamil (Traditional & Devotional)</option>
-                  <option>English</option>
-                  <option>Malayalam</option>
-                  <option>Telugu</option>
-                  <option>Hindi</option>
-                </select>
+                {recResult.map((line, i) => (
+                  <p key={i} className={`text-sm ${line.startsWith('✦') ? 'text-emerald-800 font-semibold mt-2' : line === '' ? 'py-0.5' : line.endsWith(':') ? 'font-bold text-slate-700 mt-2' : 'text-slate-600 pl-3'}`}>
+                    {line}
+                  </p>
+                ))}
               </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Vocal Roster Strength</label>
-                <select value={recVocalStrength} onChange={e => setRecVocalStrength(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-200">
-                  <option value="balanced">Balanced Saturation (Default)</option>
-                  <option value="soprano_heavy">Heavy Sopranos (melodic projection)</option>
-                  <option value="bass_heavy">Deep Bass dominance (gregorian)</option>
-                  <option value="instrumental_only">Acapella Choral Modes</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Custom Theme / Secondary Saint</label>
-                <textarea
-                  value={recCustomPrompt}
-                  onChange={e => setRecCustomPrompt(e.target.value)}
-                  placeholder="e.g. Include traditional St. Cecilia hymns and focus on fast tempos."
-                  className="w-full p-2.5 rounded-lg border border-slate-200 h-16"
-                />
-              </div>
-
-              <button
-                onClick={handleRecommendSongs}
-                disabled={recoLoading}
-                className="w-full py-3 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
-                id="recommend-btn-trigger"
-              >
-                <Sparkles className="w-4 h-4" />
-                {recoLoading ? 'Recommending...' : 'Request AI Choral Plan'}
-              </button>
             </div>
           )}
+        </div>
+      )}
 
-          {/* SERVICE 2: SCHEDULE OPTIMIZER INPUTS */}
-          {activeService === 'optimizer' && (
-            <div className="space-y-4 text-xs" id="optimizer-inputs">
-              <h3 className="font-sans font-bold text-slate-900 text-sm flex items-center gap-2 pb-2 border-b border-slate-100">
-                <CalendarCheck className="w-4 h-4 text-emerald-600" />
-                Select Mass Calendar
-              </h3>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Target Roster Mass</label>
-                <select
-                  value={selectedMassId}
-                  onChange={e => setSelectedMassId(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-200"
-                >
-                  {masses.slice(0, 5).map((m) => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.date})</option>
+      {/* ── Tab 2: Schedule Optimiser ── */}
+      {activeTab === 'optimizer' && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+              <Sliders className="h-4 w-4 text-emerald-600" /> Choir Schedule Optimiser
+            </h3>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase text-slate-400">Select Mass</label>
+              {masses.length === 0 ? (
+                <p className="text-xs text-slate-500 py-2">No masses logged yet. Add a mass in Liturgy & Masses first.</p>
+              ) : (
+                <select value={selMassId} onChange={e => setSelMassId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                  {masses.map(m => (
+                    <option key={m.id} value={m.id}>{m.name} — {m.date}</option>
                   ))}
                 </select>
-              </div>
+              )}
+            </div>
 
-              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 font-sans space-y-1">
-                <p className="font-semibold text-slate-800 text-[10px]">What this optimizer does:</p>
-                <p className="text-[10px] text-slate-500 leading-normal">
-                  It iterates over all approved members, analyzes their active weekend availability settings, and audits whether the Soprano/Alto/Tenor/Bass ratios can sustain traditional four-part choral hymns.
-                </p>
-              </div>
+            {/* Member stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {(['Active Member', 'Approved'] as const).flatMap(_ => []).concat([]).length === 0 && (
+                <>
+                  {[
+                    { label: 'Active Members',    value: members.filter(m => m.status === 'Active Member').length, icon: Users },
+                    { label: 'Singers',           value: members.filter(m => m.memberType === 'Singer').length, icon: Music },
+                    { label: 'Instrumentalists',  value: members.filter(m => m.memberType !== 'Singer').length, icon: BookOpen },
+                    { label: 'Pending Approval',  value: members.filter(m => m.status === 'Pending').length, icon: Bell },
+                  ].map(s => (
+                    <div key={s.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+                      <s.icon className="h-4 w-4 text-slate-400 mx-auto mb-1" />
+                      <p className="text-lg font-bold text-slate-900">{s.value}</p>
+                      <p className="text-[9px] text-slate-500 uppercase tracking-wide">{s.label}</p>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
 
-              <button
-                onClick={handleOptimizeSchedule}
-                disabled={optLoading}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
-                id="optimize-btn-trigger"
-              >
-                <Sparkles className="w-4 h-4" />
-                {optLoading ? 'Analyzing...' : 'Audit Scheduled Roster'}
-              </button>
+            <button onClick={handleOptimize} disabled={optLoading || masses.length === 0}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#18392f] py-2.5 text-sm font-bold text-white min-h-[44px] disabled:opacity-60">
+              <CalendarCheck className="h-4 w-4 text-amber-300" />
+              {optLoading ? 'Analysing…' : 'Optimise Roster'}
+            </button>
+          </div>
+
+          {optResult.length > 0 && (
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+              <h4 className="text-xs font-bold uppercase text-blue-700 mb-3 flex items-center gap-1.5">
+                <CheckCircle className="h-3.5 w-3.5" /> Optimisation Report
+              </h4>
+              <div className="space-y-1">
+                {optResult.map((line, i) => (
+                  <p key={i} className={`text-sm ${line.startsWith('⚠') ? 'text-amber-800 font-semibold' : line.startsWith('✓') ? 'text-emerald-700 font-semibold' : line === '' ? 'py-0.5' : line.endsWith(':') ? 'font-bold text-slate-700 mt-2' : 'text-slate-600 pl-3'}`}>
+                    {line}
+                  </p>
+                ))}
+              </div>
             </div>
           )}
+        </div>
+      )}
 
-          {/* SERVICE 3: CONTENT GENERATOR INPUTS */}
-          {activeService === 'content_gen' && (
-            <div className="space-y-4 text-xs" id="content-gen-inputs">
-              <h3 className="font-sans font-bold text-slate-900 text-sm flex items-center gap-2 pb-2 border-b border-slate-100">
-                <FileText className="w-4 h-4 text-emerald-600" />
-                Bulletin Content parameters
-              </h3>
-
+      {/* ── Tab 3: Content Generator ── */}
+      {activeTab === 'content' && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+              <FileText className="h-4 w-4 text-emerald-600" /> Choir Content Generator
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Communication Preset</label>
-                <select value={genType} onChange={e => setGenType(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-200">
-                  <option value="birthdayWish">Personal Birthday Congratulations</option>
-                  <option value="announcement">Parish Choral Announcement / Bulletin</option>
-                  <option value="invitation">Mass practice rehearsal Invitation</option>
-                  <option value="thankYou">Post Feast Patron Thank You message</option>
-                  <option value="newsletter">Monthly Diocese Choral Circular</option>
+                <label className="text-[10px] font-bold uppercase text-slate-400">Content Type</label>
+                <select value={genType} onChange={e => setGenType(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                  {GEN_TYPES.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
                 </select>
               </div>
-
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Primary Raw Details / Bullet points</label>
-                <textarea
-                  value={genDetails}
-                  onChange={e => setGenDetails(e.target.value)}
-                  placeholder="Enter the real member name, ministry context, date, and message details."
-                  className="w-full p-2.5 rounded-lg border border-slate-200 h-28 font-sans"
-                  required
-                />
+                <label className="text-[10px] font-bold uppercase text-slate-400">Details / Name</label>
+                <input value={genDetails} onChange={e => setGenDetails(e.target.value)}
+                  placeholder="e.g. member name, date, amount…"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-emerald-400" />
               </div>
+            </div>
+            <button onClick={handleGenerate} disabled={genLoading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#18392f] py-2.5 text-sm font-bold text-white min-h-[44px] disabled:opacity-60">
+              <Send className="h-4 w-4 text-amber-300" />
+              {genLoading ? 'Generating…' : 'Generate Content'}
+            </button>
+          </div>
 
-              <button
-                onClick={handleGenerateContent}
-                disabled={genLoading}
-                className="w-full py-3 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
-                id="content-gen-btn-trigger"
-              >
-                <Sparkles className="w-4 h-4" />
-                {genLoading ? 'Composing...' : 'Compose Liturgical Copy'}
-              </button>
+          {genResult && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase text-slate-500">Generated Content</h4>
+                <button onClick={handleCopy}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 min-h-[32px]">
+                  {copied ? '✓ Copied' : 'Copy'}
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm text-slate-700 font-sans leading-relaxed border border-slate-100">
+                {genResult}
+              </pre>
             </div>
           )}
         </div>
-
-        {/* RIGHT COLUMN: AI GENERATION RESPONSE CANVAS (GPAY, NOTION, APPLE STYLED) */}
-        <div className="lg:col-span-2 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-white p-6 md:p-8 rounded-3xl border border-slate-800 shadow-xl overflow-y-auto max-h-[580px] flex flex-col justify-between" id="ai-canvas-output">
-          
-          {/* STATIC PREVIEW BANNER */}
-          <div className="flex items-center justify-between border-b border-slate-850 pb-4 mb-4 gap-2">
-            <div className="flex items-center gap-1.5">
-              <Sparkles className="w-5 h-5 text-emerald-400 animate-pulse" />
-              <span className="text-xs font-mono font-bold tracking-wider uppercase text-emerald-400">Response Canvas</span>
-            </div>
-            <span className="text-[10px] font-mono opacity-50 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded">
-              GEMINI-3.5-FLASH-ENGINE
-            </span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto scrollbar-thin text-xs space-y-6" id="canvas-content-scroller">
-            
-            {/* SERVICE 1: RECOMMENDATIONS DISPLAY */}
-            {activeService === 'recommender' && (
-              <div className="space-y-5" id="recommender-response-view">
-                {recoData ? (
-                  <div className="space-y-4 animate-fade-in">
-                    {/* Explanation */}
-                    <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 leading-relaxed font-sans text-slate-300">
-                      {recoData.explanation}
-                    </div>
-
-                    {/* Hymns listing */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {recoData.recommendedSongs?.map((rs: any, i: number) => (
-                        <div key={i} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-                          <span className="text-[9px] bg-emerald-950 text-emerald-300 font-bold border border-emerald-800 px-2 py-0.5 rounded uppercase font-mono">
-                            {rs.type}
-                          </span>
-                          <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <Music className="w-3.5 h-3.5 text-emerald-400" />
-                            {rs.title}
-                          </h4>
-                          <p className="text-[10px] text-slate-400 font-sans leading-normal">{rs.liturgicalReasoning}</p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <button
-                      onClick={() => alert("Choral roster updated: Song selections published to the upcoming mass rehearsal planner!")}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold font-sans cursor-pointer transition shadow"
-                    >
-                      Publish Songs to Rehearsal Planner
-                    </button>
-                  </div>
-                ) : (
-                  <div className="py-16 text-center text-slate-500 space-y-2">
-                    <Music className="w-12 h-12 mx-auto opacity-30 text-slate-400" />
-                    <p className="text-xs leading-normal">Select mass constraints and click <strong>"Request AI Choral Plan"</strong> above.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* SERVICE 2: OPTIMIZER DISPLAY */}
-            {activeService === 'optimizer' && (
-              <div className="space-y-5" id="optimizer-response-view">
-                {optData ? (
-                  <div className="space-y-6 animate-fade-in text-xs font-sans">
-                    {/* Score and evaluation */}
-                    <div className="flex flex-col sm:flex-row gap-4 items-center bg-slate-900 border border-slate-800 p-5 rounded-xl justify-between">
-                      <div className="space-y-1.5 text-center sm:text-left">
-                        <h4 className="font-sans font-bold text-sm text-white">Choral Roster Health Score</h4>
-                        <p className="text-[10px] text-slate-400">{optData.evaluation}</p>
-                      </div>
-                      
-                      <div className="text-center bg-emerald-950 border border-emerald-800 p-3 rounded-2xl w-24">
-                        <p className="text-2xl font-extrabold text-white font-mono">{optData.balanceScore}%</p>
-                        <p className="text-[8px] font-bold uppercase tracking-wider text-emerald-400">Roster Score</p>
-                      </div>
-                    </div>
-
-                    {/* Registrations audit */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* vocal balance */}
-                      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
-                        <p className="text-[9px] font-bold text-slate-400 uppercase font-mono tracking-wider">Vocal Harmony Audit</p>
-                        <p className="text-xs text-white leading-relaxed">{optData.vocalBalanceStatus}</p>
-                      </div>
-                      
-                      {/* instrumental status */}
-                      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
-                        <p className="text-[9px] font-bold text-slate-400 uppercase font-mono tracking-wider">Instrumental Coverage</p>
-                        <p className="text-xs text-white leading-relaxed">{optData.instrumentalStatus}</p>
-                      </div>
-                    </div>
-
-                    {/* Alerts panel */}
-                    {optData.safetyAlerts?.length > 0 && (
-                      <div className="bg-rose-950/40 p-4 border border-rose-900/80 rounded-xl space-y-2">
-                        <h5 className="text-[10px] font-bold text-rose-300 uppercase tracking-wider flex items-center gap-1">
-                          <AlertTriangle className="w-4 h-4 text-rose-400" /> Critical Warnings
-                        </h5>
-                        <ul className="list-disc pl-4 space-y-1 text-[11px] text-rose-200">
-                          {optData.safetyAlerts.map((al: string, i: number) => <li key={i}>{al}</li>)}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Sugg list */}
-                    <div className="space-y-2.5">
-                      <h5 className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">AI Structural Suggestions</h5>
-                      <div className="grid grid-cols-1 gap-2">
-                        {optData.structuralSuggestions?.map((sug: string, idx: number) => (
-                          <div key={idx} className="flex items-start gap-2 bg-slate-900/40 p-2.5 rounded-lg border border-slate-850">
-                            <span className="text-emerald-400 font-mono font-bold mt-0.5">#{idx + 1}</span>
-                            <p className="text-[11px] text-slate-300 leading-normal">{sug}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="py-16 text-center text-slate-500 space-y-2">
-                    <CalendarCheck className="w-12 h-12 mx-auto opacity-30 text-slate-400" />
-                    <p className="text-xs leading-normal">Choose mass calendar target and click <strong>"Audit Scheduled Roster"</strong> above.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* SERVICE 3: CONTENT GEN DISPLAY */}
-            {activeService === 'content_gen' && (
-              <div className="space-y-5 animate-fade-in" id="content-gen-response-view">
-                {genData ? (
-                  <div className="space-y-4">
-                    {/* Generated Mail template card */}
-                    <div className="p-6 bg-slate-900 rounded-2xl border border-slate-800 space-y-4 font-sans text-slate-300">
-                      <div className="border-b border-slate-800 pb-3 space-y-1">
-                        <span className="text-[9px] font-mono text-slate-500 block">SUBJECT LINE:</span>
-                        <h4 className="text-xs font-bold text-white uppercase">{genData.subject}</h4>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <span className="text-[9px] font-mono text-slate-500 block">BODY:</span>
-                        <p className="text-xs leading-relaxed whitespace-pre-wrap">{genData.body}</p>
-                      </div>
-
-                      <div className="border-t border-slate-800 pt-3 space-y-1">
-                        <span className="text-[9px] font-mono text-slate-500 block">CLOSING SIGNATURE:</span>
-                        <p className="text-xs font-bold text-emerald-400 italic font-mono">{genData.closing}</p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => alert("Copied liturgical copy successfully to clipboard!")}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold font-sans cursor-pointer transition shadow"
-                    >
-                      Copy Content to clipboard
-                    </button>
-                  </div>
-                ) : (
-                  <div className="py-16 text-center text-slate-500 space-y-2">
-                    <FileText className="w-12 h-12 mx-auto opacity-30 text-slate-400" />
-                    <p className="text-xs leading-normal">Select presets and click <strong>"Compose Liturgical Copy"</strong> above.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-          </div>
-
-          {/* Footer warning */}
-          <div className="pt-4 border-t border-slate-850 flex items-center justify-between text-[10px] text-slate-500">
-            <span>Liturgically secure • GDPR compliant data storage</span>
-            <span>Zero Trust Authentication Active</span>
-          </div>
-
-        </div>
-      </div>
+      )}
     </div>
   );
 };

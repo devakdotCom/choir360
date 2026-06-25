@@ -58,9 +58,27 @@ export type SyncedRecord<T> = T & TenantScopedRecord;
 
 export type VoiceType = 'Soprano' | 'Alto' | 'Tenor' | 'Bass' | 'None';
 
-export type MemberType = 'Singer' | 'Keyboard' | 'Guitar' | 'Violin' | 'Flute' | 'Tabla' | 'Pad' | 'Drums' | 'Other';
+export type MemberType =
+  | 'Singer'
+  | 'Keyboard'
+  | 'Guitar'
+  | 'Violin'
+  | 'Flute'
+  | 'Tabla'
+  | 'Pad'
+  | 'Drums'
+  | 'Harmonium'
+  | 'Veena'
+  | 'Mridangam'
+  | 'Other';
 
-export type MemberStatus = 'Pending' | 'Correction Requested' | 'Approved' | 'Active Member' | 'Rejected' | 'Admin';
+export type MemberStatus =
+  | 'Pending'
+  | 'Correction Requested'
+  | 'Approved'
+  | 'Active Member'
+  | 'Rejected'
+  | 'Admin';
 
 export interface Member {
   id: string;
@@ -77,6 +95,8 @@ export interface Member {
   choirName: string;
   voiceType: VoiceType;
   memberType: MemberType;
+  /** Instrument played (if instrumentalist). Same as memberType for non-singers. */
+  instrument?: string;
   skills: string;
   experience: number;
   emergencyContact: {
@@ -88,9 +108,44 @@ export interface Member {
   joiningDate: string;
   correctionNote?: string;
   attendanceRate?: number;
+  /** Weight for share calculation: singers = 1, instrumentalists = 2 */
+  shareWeight?: 1 | 2;
 }
 
-export type MassCategory = 'Sunday Mass' | 'Weekday Mass' | 'Special Mass' | 'Death Mass' | 'Death Anniversary Mass';
+// =============================================================================
+// Mass & Liturgy
+// =============================================================================
+
+export type MassCategory =
+  | 'Sunday Mass'
+  | 'Weekday Mass'
+  | 'Special Mass'
+  | 'Wedding'
+  | 'Funeral'
+  | 'Death Mass'
+  | 'Death Anniversary Mass'
+  | 'Feast Day'
+  | 'Ordination'
+  | 'First Holy Communion'
+  | 'Confirmation'
+  | 'Novena';
+
+/** Categories that require payment tracking */
+export const PAYMENT_MASS_CATEGORIES: MassCategory[] = [
+  'Special Mass',
+  'Wedding',
+  'Funeral',
+  'Death Mass',
+  'Death Anniversary Mass',
+  'Feast Day',
+  'Ordination',
+  'First Holy Communion',
+  'Confirmation',
+];
+
+export function isPaymentMassCategory(cat: MassCategory): boolean {
+  return PAYMENT_MASS_CATEGORIES.includes(cat);
+}
 
 export interface Mass {
   id: string;
@@ -99,25 +154,38 @@ export interface Mass {
   date: string;
   time: string;
   language: string;
+  celebrant?: string;
+  venue?: string;
+  notes?: string;
+  /** Choir members who attended this Mass */
+  attendingMemberIds?: string[];
 }
 
 export interface Payment {
   id: string;
+  massId?: string;
   partyName: string;
   mobile: string;
   massType: string;
   massDate: string;
   massTime: string;
+  /** Amount proposed / promised (₹) */
   promisedAmount: number;
+  /** Amount actually received (₹) */
   receivedAmount: number;
+  /** Remaining balance (₹) */
   pendingAmount: number;
+  /** Date payment was received (ISO string) */
   dateReceived?: string;
-  status: 'Pending' | 'Received';
-  remarks?: string;
-  massId?: string;
+  /** Who made the payment */
   whoPaid?: string;
+  /** Cash / UPI / Cheque / NEFT */
   paymentMode?: string;
   receiptNo?: string;
+  remarks?: string;
+  status: 'Pending' | 'Received' | 'Partial';
+  /** Sponsor name (e.g. for feast days) */
+  sponsor?: string;
 }
 
 export interface ShareCalculation {
@@ -128,33 +196,83 @@ export interface ShareCalculation {
   totalAmount: number;
   singersCount: number;
   instrumentalistsCount: number;
+  /** singers*1 + instrumentalists*2 */
   totalUnits: number;
+  /** totalAmount / totalUnits */
   unitValue: number;
+  /** unitValue * 1 */
   singerShare: number;
+  /** unitValue * 2 */
   instrumentalistShare: number;
   isLocked: boolean;
   participatingMembers: {
     memberId: string;
     name: string;
     type: MemberType;
+    weight: 1 | 2;
     share: number;
   }[];
 }
+
+// =============================================================================
+// Attendance
+// =============================================================================
 
 export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Excused';
 
 export interface AttendanceRecord {
   id: string;
   entityId: string;
-  entityType: 'Mass' | 'Practice' | 'Event';
+  entityType: 'Mass' | 'Rehearsal' | 'Event';
   entityName: string;
   date: string;
   memberId: string;
   memberName: string;
   status: AttendanceStatus;
+  notes?: string;
 }
 
-export type EventCategory = 'Choir Practice' | 'Feast' | 'Retreat' | 'Pilgrimage' | 'Tour' | 'Concert' | 'Parish Event';
+// =============================================================================
+// Rehearsals
+// =============================================================================
+
+export type RehearsalType =
+  | 'Regular Practice'
+  | 'Pre-Sunday Practice'
+  | 'Feast Preparation'
+  | 'New Song Workshop'
+  | 'Special Preparation'
+  | 'Sectional Practice';
+
+export interface Rehearsal {
+  id: string;
+  name: string;
+  type: RehearsalType;
+  date: string;
+  startTime: string;
+  endTime: string;
+  venue: string;
+  conductor?: string;
+  songs?: string[];
+  notes?: string;
+  attendingMemberIds?: string[];
+  status: 'Scheduled' | 'Completed' | 'Cancelled';
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+export type EventCategory =
+  | 'Choir Practice'
+  | 'Feast'
+  | 'Retreat'
+  | 'Pilgrimage'
+  | 'Tour'
+  | 'Concert'
+  | 'Parish Event'
+  | 'Diocese Event'
+  | 'Competition';
 
 export interface ChoirEvent {
   id: string;
@@ -170,6 +288,10 @@ export interface ChoirEvent {
   };
 }
 
+// =============================================================================
+// Songs
+// =============================================================================
+
 export interface Song {
   id: string;
   title: string;
@@ -179,7 +301,15 @@ export interface Song {
   album?: string;
   composer?: string;
   singer?: string;
-  category: 'Roman Catholic Songs' | 'Praise & Worship' | 'Devotional Songs' | 'Retreat Songs' | 'Choir Competition Songs' | 'Non-Catholic Christian Songs' | 'Unknown' | 'Jebathotta Jeyageethangal';
+  category:
+    | 'Roman Catholic Songs'
+    | 'Praise & Worship'
+    | 'Devotional Songs'
+    | 'Retreat Songs'
+    | 'Choir Competition Songs'
+    | 'Non-Catholic Christian Songs'
+    | 'Unknown'
+    | 'Jebathotta Jeyageethangal';
   source?: string;
   lyrics: string;
   lyricsEnglishPattern?: string;
@@ -193,6 +323,10 @@ export interface Song {
   audioUrl?: string;
   videoUrl?: string;
 }
+
+// =============================================================================
+// Bible & Readings
+// =============================================================================
 
 export type BibleLanguage = 'ta' | 'en';
 
@@ -242,13 +376,17 @@ export interface DailyReading {
   syncMessage?: string;
 }
 
+// =============================================================================
+// Announcements & Notifications
+// =============================================================================
+
 export interface Announcement {
   id: string;
   title: string;
   content: string;
   date: string;
   publishedBy: string;
-  category: 'News' | 'Circular' | 'Choir Notice' | 'Feast Update';
+  category: 'News' | 'Circular' | 'Choir Notice' | 'Feast Update' | 'Finance' | 'Rehearsal';
 }
 
 export interface SaintOfDay {

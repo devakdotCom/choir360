@@ -17,7 +17,7 @@ import {
   type QueryConstraint,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { DEFAULT_TENANT_CONTEXT, createRecordMetadata, updateRecordMetadata } from './recordMetadata';
+import { DEFAULT_TENANT_CONTEXT, createRecordMetadata, updateRecordMetadata, type TenantContext } from './recordMetadata';
 import { TenantScopedRecord } from '../types';
 
 const firebaseConfig = {
@@ -60,6 +60,7 @@ export const COLLECTIONS = {
   auditLogs: 'auditLogs',
   appSettings: 'appSettings',
   dailyReadings: 'dailyReadings',
+  rehearsals: 'rehearsals',
   media: 'cloudinaryMedia',
 } as const;
 
@@ -78,13 +79,17 @@ export function listenToTenantCollection<T>(
   onError?: (error: Error) => void,
   extraConstraints: QueryConstraint[] = [],
   pageSize = 50,
+  tenantContext?: TenantContext,
 ): Unsubscribe {
   if (!db) return () => undefined;
 
+  // Always use the dynamically provided context — fall back to env-var defaults
+  // only when no parish has been selected yet (onboarding flow).
+  const ctx = tenantContext ?? DEFAULT_TENANT_CONTEXT;
+
   const constraints = [
-    where('tenantId', '==', DEFAULT_TENANT_CONTEXT.tenantId),
-    where('parishId', '==', DEFAULT_TENANT_CONTEXT.parishId),
-    where('choirId', '==', DEFAULT_TENANT_CONTEXT.choirId),
+    where('tenantId', '==', ctx.tenantId),
+    where('parishId', '==', ctx.parishId),
     where('status', '!=', 'deleted'),
     orderBy('status'),
     orderBy('updatedAt', 'desc'),
@@ -107,7 +112,9 @@ export async function upsertTenantRecord<T extends { id: string } & Partial<Tena
   const database = requireDb();
   const payload = {
     ...record,
-    ...(record.createdAt ? updateRecordMetadata(record, userId) : createRecordMetadata(userId, record.status || 'active')),
+    ...(record.createdAt
+      ? updateRecordMetadata(record, userId)
+      : createRecordMetadata(userId, record.status || 'active')),
   };
   await setDoc(doc(database, COLLECTIONS[collectionName], record.id), payload, { merge: true });
 }
@@ -133,7 +140,9 @@ export async function batchUpsertTenantRecords<T extends { id: string } & Partia
   records.forEach((record) => {
     const payload = {
       ...record,
-      ...(record.createdAt ? updateRecordMetadata(record, userId) : createRecordMetadata(userId, record.status || 'active')),
+      ...(record.createdAt
+        ? updateRecordMetadata(record, userId)
+        : createRecordMetadata(userId, record.status || 'active')),
     };
     batch.set(doc(database, COLLECTIONS[collectionName], record.id), payload, { merge: true });
   });

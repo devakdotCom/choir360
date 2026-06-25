@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useSyncedCollection } from './useSyncedCollection';
+import { TenantContext } from '../services/recordMetadata';
 import { Member, TenantScopedRecord } from '../types';
 
 /**
@@ -42,7 +43,11 @@ function mergeMember(pub: PublicMember, priv: PrivateFields | undefined): Member
  * a separate, tightly-scoped `privateMembers` collection while still handing
  * callers a fully-merged `Member[]` — no other component needs to change.
  */
-export function useMembersWithPrivateData(fallbackRecords: Member[], syncEnabled = true) {
+export function useMembersWithPrivateData(
+  fallbackRecords: Member[],
+  syncEnabled = true,
+  tenantContext?: TenantContext,
+) {
   const fallbackPublic = useMemo(
     () => fallbackRecords.map((m) => splitMember(m).publicPart),
     [fallbackRecords],
@@ -52,11 +57,12 @@ export function useMembersWithPrivateData(fallbackRecords: Member[], syncEnabled
     [fallbackRecords],
   );
 
-  const publicCollection = useSyncedCollection<PublicMember>('members', fallbackPublic, syncEnabled);
+  const publicCollection = useSyncedCollection<PublicMember>('members', fallbackPublic, syncEnabled, tenantContext);
   const privateCollection = useSyncedCollection<PrivateFields & { id: string }>(
     'privateMembers',
     fallbackPrivate,
     syncEnabled,
+    tenantContext,
   );
 
   const records = useMemo<Member[]>(() => {

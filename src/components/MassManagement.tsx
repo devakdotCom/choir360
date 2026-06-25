@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mass, Payment, Member, Language } from '../types';
+import { Mass, MassCategory, Payment, Member, Language, isPaymentMassCategory } from '../types';
 import {
   BookOpen, Calculator, Lock, Unlock, Bell,
   ArrowUpRight, Download, IndianRupee,
@@ -8,10 +8,12 @@ import {
 import { MULTILINGUAL_DICTIONARY } from '../data/mockData';
 import { formatINR } from '../utils/currency';
 
-const PAYMENT_MASS_TYPES: Mass['category'][] = [
-  'Special Mass', 'Death Mass', 'Death Anniversary Mass',
+const ALL_MASS_CATEGORIES: MassCategory[] = [
+  'Sunday Mass', 'Weekday Mass', 'Special Mass', 'Wedding', 'Funeral',
+  'Death Mass', 'Death Anniversary Mass', 'Feast Day', 'Ordination',
+  'First Holy Communion', 'Confirmation', 'Novena',
 ];
-const isPaymentMass = (cat: Mass['category']) => PAYMENT_MASS_TYPES.includes(cat);
+const isPaymentMass = (cat: MassCategory) => isPaymentMassCategory(cat);
 
 interface MassManagementProps {
   currentLang: Language;
@@ -40,7 +42,7 @@ export const MassManagement: React.FC<MassManagementProps> = ({
 
   // ── Mass form ──────────────────────────────────────────────────────────────
   const [massName,     setMassName]     = useState('');
-  const [massCategory, setMassCategory] = useState<Mass['category']>('Sunday Mass');
+  const [massCategory, setMassCategory] = useState<MassCategory>('Sunday Mass');
   const [massDate,     setMassDate]     = useState(new Date().toISOString().slice(0, 10));
   const [massTime,     setMassTime]     = useState('06:30 AM');
   const [massLang,     setMassLang]     = useState('Tamil');
@@ -302,13 +304,11 @@ export const MassManagement: React.FC<MassManagementProps> = ({
 
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase">Liturgical Rite Category</label>
-              <select value={massCategory} onChange={(e) => setMassCategory(e.target.value as Mass['category'])}
+              <select value={massCategory} onChange={(e) => setMassCategory(e.target.value as MassCategory)}
                 className="w-full px-3 py-2.5 min-h-[44px] rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
-                <option value="Sunday Mass">Sunday Mass (Communal)</option>
-                <option value="Weekday Mass">Regular Weekday Mass</option>
-                <option value="Special Mass">Special Mass (Marriage, Feast, Ordination)</option>
-                <option value="Death Mass">Death Mass (Funeral Requiem)</option>
-                <option value="Death Anniversary Mass">Death Anniversary Mass (Memorial)</option>
+                {ALL_MASS_CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
               </select>
             </div>
 
@@ -829,11 +829,9 @@ export const MassManagement: React.FC<MassManagementProps> = ({
                 <select value={editingMass.category}
                   onChange={(e) => setEditingMass({ ...editingMass, category: e.target.value as Mass['category'] })}
                   className="w-full px-3 py-2.5 min-h-[44px] rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
-                  <option value="Sunday Mass">Sunday Mass</option>
-                  <option value="Weekday Mass">Weekday Mass</option>
-                  <option value="Special Mass">Special Mass</option>
-                  <option value="Death Mass">Death Mass</option>
-                  <option value="Death Anniversary Mass">Death Anniversary Mass</option>
+                  {ALL_MASS_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-2">
