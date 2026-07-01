@@ -1005,15 +1005,15 @@ async function shouldSyncCatholicHubSongCategory(categoryId: string) {
   const status = statusSnap.exists ? statusSnap.data() as CatholicHubSongSyncStatusRecord : null;
   const activeSongCount = await countActiveCatholicHubSongs(categoryId);
 
+  if (activeSongCount === 0) {
+    return { shouldSync: true, reason: "Category has no cached songs.", activeSongCount };
+  }
+
   if (status?.status === "syncing" && status.lastSyncedAt) {
     const syncAge = Date.now() - new Date(status.lastSyncedAt).getTime();
     if (syncAge < 10 * 60 * 1000) {
       return { shouldSync: false, reason: "Sync already running.", activeSongCount };
     }
-  }
-
-  if (activeSongCount === 0) {
-    return { shouldSync: true, reason: "Category has no cached songs.", activeSongCount };
   }
 
   const lastSuccess = status?.lastSuccessAt;
