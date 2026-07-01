@@ -10,7 +10,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "firebase:set-claims": "node scripts/setFirebaseClaims.mjs",
-    "firebase:seed": "node scripts/seedFirestore.mjs"
+    "firebase:seed": "node scripts/seedFirestore.mjs",
+    "firebase:provision-admin": "node scripts/provisionParishAdmin.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

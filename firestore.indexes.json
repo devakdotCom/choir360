@@ -5,6 +5,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -30,6 +34,10 @@
       "collectionGroup": "members",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -61,6 +69,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -91,6 +103,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -116,6 +132,10 @@
       "collectionGroup": "masses",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -143,6 +163,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -169,6 +193,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -194,6 +222,10 @@
       "collectionGroup": "events",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -220,6 +252,10 @@
       "collectionGroup": "payments",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -247,6 +283,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -272,6 +312,10 @@
       "collectionGroup": "attendance",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -303,6 +347,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -333,6 +381,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -362,6 +414,10 @@
       "collectionGroup": "songs",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -393,6 +449,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -418,6 +478,10 @@
       "collectionGroup": "dailyReadings",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -449,6 +513,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -478,6 +546,10 @@
       "collectionGroup": "auditLogs",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -519,6 +591,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -540,6 +616,10 @@
       "collectionGroup": "privateMembers",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -563,6 +643,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -584,6 +668,10 @@
       "collectionGroup": "payments",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -607,6 +695,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -629,6 +721,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -650,6 +746,10 @@
       "collectionGroup": "rehearsals",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -673,6 +773,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -694,6 +798,10 @@
       "collectionGroup": "songs",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -717,6 +825,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -738,6 +850,10 @@
       "collectionGroup": "cloudinaryMedia",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
@@ -761,6 +877,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -783,6 +903,10 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "tenantId",
           "order": "ASCENDING"
         },
@@ -804,6 +928,10 @@
       "collectionGroup": "rehearsals",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "archdioceseId",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "tenantId",
           "order": "ASCENDING"

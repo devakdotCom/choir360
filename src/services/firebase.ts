@@ -73,6 +73,16 @@ function requireDb() {
   return db;
 }
 
+function tenantContextFromRecord(record: Partial<TenantScopedRecord>): TenantContext {
+  return {
+    archdioceseId: record.archdioceseId || DEFAULT_TENANT_CONTEXT.archdioceseId,
+    parishName: record.parishName || DEFAULT_TENANT_CONTEXT.parishName,
+    tenantId: record.tenantId || DEFAULT_TENANT_CONTEXT.tenantId,
+    parishId: record.parishId || DEFAULT_TENANT_CONTEXT.parishId,
+    choirId: record.choirId || DEFAULT_TENANT_CONTEXT.choirId,
+  };
+}
+
 export function listenToTenantCollection<T>(
   collectionName: CollectionName,
   onChange: (records: T[]) => void,
@@ -88,6 +98,7 @@ export function listenToTenantCollection<T>(
   const ctx = tenantContext ?? DEFAULT_TENANT_CONTEXT;
 
   const constraints = [
+    where('archdioceseId', '==', ctx.archdioceseId),
     where('tenantId', '==', ctx.tenantId),
     where('parishId', '==', ctx.parishId),
     where('status', '!=', 'deleted'),
@@ -114,7 +125,7 @@ export async function upsertTenantRecord<T extends { id: string } & Partial<Tena
     ...record,
     ...(record.createdAt
       ? updateRecordMetadata(record, userId)
-      : createRecordMetadata(userId, record.status || 'active')),
+      : createRecordMetadata(userId, record.status || 'active', tenantContextFromRecord(record))),
   };
   await setDoc(doc(database, COLLECTIONS[collectionName], record.id), payload, { merge: true });
 }
@@ -142,7 +153,7 @@ export async function batchUpsertTenantRecords<T extends { id: string } & Partia
       ...record,
       ...(record.createdAt
         ? updateRecordMetadata(record, userId)
-        : createRecordMetadata(userId, record.status || 'active')),
+        : createRecordMetadata(userId, record.status || 'active', tenantContextFromRecord(record))),
     };
     batch.set(doc(database, COLLECTIONS[collectionName], record.id), payload, { merge: true });
   });

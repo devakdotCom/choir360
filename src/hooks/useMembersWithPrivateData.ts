@@ -15,6 +15,7 @@ const PRIVATE_FIELD_KEYS = ['dob', 'mobile', 'whatsapp', 'email', 'address', 'em
 type PrivateFieldKey = typeof PRIVATE_FIELD_KEYS[number];
 type PrivateFields = Pick<Member, PrivateFieldKey>;
 type PublicMember = Omit<Member, PrivateFieldKey>;
+type PrivateMemberRecord = PrivateFields & { id: string } & Partial<TenantScopedRecord>;
 
 const EMPTY_PRIVATE_FIELDS: PrivateFields = {
   dob: '',
@@ -25,11 +26,45 @@ const EMPTY_PRIVATE_FIELDS: PrivateFields = {
   emergencyContact: { name: '', relationship: '', phone: '' },
 };
 
-function splitMember(member: Member): { publicPart: PublicMember; privatePart: PrivateFields & { id: string } } {
+const TENANT_FIELD_KEYS = [
+  'createdAt',
+  'updatedAt',
+  'createdBy',
+  'updatedBy',
+  'status',
+  'archdioceseId',
+  'parishName',
+  'tenantId',
+  'parishId',
+  'choirId',
+  'deletedAt',
+  'deletedBy',
+] as const;
+
+function copyTenantEnvelope(record: Partial<TenantScopedRecord>) {
+  const envelope: Partial<TenantScopedRecord> = {};
+  TENANT_FIELD_KEYS.forEach((key) => {
+    if (record[key] !== undefined) {
+      (envelope as Record<string, unknown>)[key] = record[key];
+    }
+  });
+  return envelope;
+}
+
+function splitMember(member: Member & Partial<TenantScopedRecord>): { publicPart: PublicMember; privatePart: PrivateMemberRecord } {
   const { dob, mobile, whatsapp, email, address, emergencyContact, ...publicPart } = member;
   return {
     publicPart,
-    privatePart: { id: member.id, dob, mobile, whatsapp, email, address, emergencyContact },
+    privatePart: {
+      id: member.id,
+      dob,
+      mobile,
+      whatsapp,
+      email,
+      address,
+      emergencyContact,
+      ...copyTenantEnvelope(member),
+    },
   };
 }
 
@@ -58,7 +93,7 @@ export function useMembersWithPrivateData(
   );
 
   const publicCollection = useSyncedCollection<PublicMember>('members', fallbackPublic, syncEnabled, tenantContext);
-  const privateCollection = useSyncedCollection<PrivateFields & { id: string }>(
+  const privateCollection = useSyncedCollection<PrivateMemberRecord>(
     'privateMembers',
     fallbackPrivate,
     syncEnabled,

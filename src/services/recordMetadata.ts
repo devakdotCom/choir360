@@ -7,6 +7,8 @@ const nowIso = () => new Date().toISOString();
 // parishId from the selected parish (not a hardcoded default).
 // =============================================================================
 export interface TenantContext {
+  archdioceseId: string;
+  parishName: string;
   tenantId: string;
   parishId: string;
   choirId: string;
@@ -18,6 +20,8 @@ export interface TenantContext {
  * write helpers so records land in the correct parish bucket.
  */
 export const DEFAULT_TENANT_CONTEXT: TenantContext = {
+  archdioceseId: import.meta.env.VITE_DEFAULT_ARCHDIOCESE_ID || import.meta.env.VITE_DEFAULT_TENANT_ID || 'global',
+  parishName: import.meta.env.VITE_DEFAULT_PARISH_NAME || 'Global Parish',
   tenantId: import.meta.env.VITE_DEFAULT_TENANT_ID || 'global',
   parishId: import.meta.env.VITE_DEFAULT_PARISH_ID || 'global',
   choirId: import.meta.env.VITE_DEFAULT_CHOIR_ID || 'global-choir',

@@ -135,6 +135,8 @@ function AppInner() {
   const tenantContext: TenantContext = React.useMemo(() => {
     if (!selectedParish) return DEFAULT_TENANT_CONTEXT;
     return {
+      archdioceseId: selectedParish.archdioceseId,
+      parishName: selectedParish.displayName,
       tenantId: archdioceseId ?? ARCHDIOCESE_ID,
       parishId: selectedParish.id,
       choirId: `${selectedParish.id}-choir`,

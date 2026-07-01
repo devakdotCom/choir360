@@ -16,6 +16,8 @@ export interface TenantScopedRecord {
   createdBy: string;
   updatedBy: string;
   status: RecordStatus;
+  archdioceseId: string;
+  parishName: string;
   tenantId: string;
   parishId: string;
   choirId: string;

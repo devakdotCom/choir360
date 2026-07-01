@@ -40,13 +40,35 @@ service cloud.firestore {
     /** Existing document belongs to the caller's tenant (or caller is super_admin). */
     function existingInTenant() {
       return signedIn()
-        && (superAdmin() || resource.data.tenantId == myTenantId());
+        && (
+          superAdmin()
+          || (
+            resource.data.tenantId == myTenantId()
+            && resource.data.parishId == myParishId()
+            && resource.data.choirId == myChoirId()
+          )
+        );
     }
 
     /** Caller has an admin-level custom claim role. */
     function adminRole() {
       return signedIn()
         && request.auth.token.role in ['super_admin', 'diocese_admin', 'parish_admin', 'choir_admin'];
+    }
+
+    /** Admin create scoped to their own parish unless super_admin. */
+    function adminTenantCreate() {
+      return adminRole()
+        && hasRequiredEnvelope()
+        && (superAdmin() || sameTenant());
+    }
+
+    /** Admin update scoped to existing tenant/parish unless super_admin. */
+    function adminTenantUpdate() {
+      return adminRole()
+        && hasRequiredEnvelope()
+        && immutableFieldsUnchanged()
+        && existingInTenant();
     }
 
     /** Super admin — cross-parish read/write with no tenant restriction. */
@@ -76,7 +98,7 @@ service cloud.firestore {
     function hasRequiredEnvelope() {
       return request.resource.data.keys().hasAll([
         'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
-        'status', 'tenantId', 'parishId', 'choirId'
+        'status', 'archdioceseId', 'parishName', 'tenantId', 'parishId', 'choirId'
       ]);
     }
 
@@ -87,6 +109,8 @@ service cloud.firestore {
     function immutableFieldsUnchanged() {
       return request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.archdioceseId == resource.data.archdioceseId
+        && request.resource.data.parishName == resource.data.parishName
         && request.resource.data.tenantId  == resource.data.tenantId
         && request.resource.data.parishId  == resource.data.parishId
         && request.resource.data.choirId   == resource.data.choirId;
@@ -175,8 +199,8 @@ service cloud.firestore {
     // =========================================================================
     match /masses/{docId} {
       allow read: if memberRole() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -186,13 +210,13 @@ service cloud.firestore {
     match /events/{docId} {
       allow read: if signedIn() && existingInTenant() && notDeleted();
 
-      allow create: if adminRole() && hasRequiredEnvelope();
+      allow create: if adminTenantCreate();
 
       // Members can patch only the `rsvps` field on existing events.
       allow update: if hasRequiredEnvelope()
         && immutableFieldsUnchanged()
         && (
-          adminRole()
+          adminTenantUpdate()
           || (
             memberRole() && sameTenant()
             && request.resource.data.diff(resource.data).affectedKeys()
@@ -208,15 +232,15 @@ service cloud.firestore {
     // =========================================================================
     match /payments/{docId} {
       allow read: if adminRole() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
     match /paymentShares/{docId} {
       allow read: if memberRole() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -225,8 +249,8 @@ service cloud.firestore {
     // =========================================================================
     match /attendance/{docId} {
       allow read: if memberRole() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -235,8 +259,8 @@ service cloud.firestore {
     // =========================================================================
     match /songs/{docId} {
       allow read: if signedIn() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -245,8 +269,8 @@ service cloud.firestore {
     // =========================================================================
     match /announcements/{docId} {
       allow read: if signedIn() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -255,8 +279,8 @@ service cloud.firestore {
     // =========================================================================
     match /notifications/{docId} {
       allow read: if memberRole() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -265,15 +289,15 @@ service cloud.firestore {
     // =========================================================================
     match /choirs/{docId} {
       allow read: if memberRole() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
     match /calendars/{docId} {
       allow read: if signedIn() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -291,16 +315,13 @@ service cloud.firestore {
           && notDeleted()
         );
 
-      allow create: if adminRole()
-        && hasRequiredEnvelope()
+      allow create: if adminTenantCreate()
         && request.resource.data.keys().hasAll([
           'date', 'language', 'title', 'liturgicalDay',
           'sourceUrl', 'lastSyncedAt', 'syncStatus', 'publicDisplay'
         ]);
 
-      allow update: if adminRole()
-        && hasRequiredEnvelope()
-        && immutableFieldsUnchanged();
+      allow update: if adminTenantUpdate();
 
       allow delete: if false;
     }
@@ -314,7 +335,8 @@ service cloud.firestore {
     match /catholicHubContent/{contentId} {
       allow read: if resource.data.status == 'active' || adminRole();
 
-      allow create, update: if adminRole() && hasRequiredEnvelope();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
 
       allow delete: if false;
     }
@@ -350,15 +372,15 @@ service cloud.firestore {
 
     match /approvalWorkflows/{docId} {
       allow read: if adminRole() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
     match /appSettings/{docId} {
       allow read: if adminRole() && existingInTenant();
-      allow create: if adminRole() && hasRequiredEnvelope();
-      allow update: if adminRole() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow create: if adminTenantCreate();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -384,7 +406,7 @@ service cloud.firestore {
           'uploadedAt', 'uploadedByUserId', 'moduleName', 'relatedRecordId'
         ]);
 
-      allow update: if adminRole() && sameTenant() && hasRequiredEnvelope() && immutableFieldsUnchanged();
+      allow update: if adminTenantUpdate();
       allow delete: if false;
     }
 
@@ -438,12 +460,12 @@ service cloud.firestore {
     // =========================================================================
     match /rehearsals/{docId} {
       allow read: if memberRole() && existingInTenant() && notDeleted();
-      allow create: if adminRole() && hasRequiredEnvelope();
+      allow create: if adminTenantCreate();
       // Choir members can patch only the attendance fields on rehearsals
       allow update: if hasRequiredEnvelope()
         && immutableFieldsUnchanged()
         && (
-          adminRole()
+          adminTenantUpdate()
           || (
             memberRole() && sameTenant()
             && request.resource.data.diff(resource.data).affectedKeys()

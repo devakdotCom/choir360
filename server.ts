@@ -239,6 +239,8 @@ app.post("/api/admin/bootstrap-super-admin", async (req, res) => {
     const user = await admin.auth().getUserByEmail(email);
     await admin.auth().setCustomUserClaims(user.uid, {
       role: "super_admin",
+      archdioceseId: process.env.DEFAULT_ARCHDIOCESE_ID || process.env.VITE_DEFAULT_ARCHDIOCESE_ID || "madras-mylapore",
+      parishName: process.env.DEFAULT_PARISH_NAME || process.env.VITE_DEFAULT_PARISH_NAME || "St Thomas Cathedral",
       tenantId: "global",
       parishId: "st-thomas-cathedral",
       choirId: "st-thomas-cathedral-choir",
@@ -281,12 +283,14 @@ app.post("/api/auth/sync-role", requireFirebaseAuth, async (req, res) => {
     const tenantId = process.env.VITE_DEFAULT_TENANT_ID || process.env.DEFAULT_TENANT_ID || "global";
     const parishId = process.env.VITE_DEFAULT_PARISH_ID || process.env.DEFAULT_PARISH_ID || "st-thomas-cathedral";
     const choirId  = process.env.VITE_DEFAULT_CHOIR_ID  || process.env.DEFAULT_CHOIR_ID  || "st-thomas-cathedral-choir";
+    const archdioceseId = process.env.VITE_DEFAULT_ARCHDIOCESE_ID || process.env.DEFAULT_ARCHDIOCESE_ID || tenantId;
+    const parishName = process.env.VITE_DEFAULT_PARISH_NAME || process.env.DEFAULT_PARISH_NAME || parishId;
 
-    await admin.auth().setCustomUserClaims(uid, { role, tenantId, parishId, choirId });
+    await admin.auth().setCustomUserClaims(uid, { role, archdioceseId, parishName, tenantId, parishId, choirId });
 
     console.log(`[Auth] sync-role: uid=${uid} email=${email} → role=${role} tenant=${tenantId}/${parishId}`);
 
-    return res.json({ ok: true, role, claims: { role, tenantId, parishId, choirId } });
+    return res.json({ ok: true, role, claims: { role, archdioceseId, parishName, tenantId, parishId, choirId } });
   } catch (error: any) {
     return res.status(400).json({ error: error?.message || "Failed to sync role." });
   }
@@ -325,6 +329,8 @@ interface DailyReadingRecord {
   createdBy: string;
   updatedBy: string;
   status: string;
+  archdioceseId: string;
+  parishName: string;
   tenantId: string;
   parishId: string;
   choirId: string;
@@ -332,6 +338,8 @@ interface DailyReadingRecord {
 
 const ARULVAKKU_CALENDAR_URL = "https://www.arulvakku.com/calendar.php";
 const DEFAULT_TENANT_CONTEXT = {
+  archdioceseId: process.env.VITE_DEFAULT_ARCHDIOCESE_ID || process.env.DEFAULT_ARCHDIOCESE_ID || "madras-mylapore",
+  parishName: process.env.VITE_DEFAULT_PARISH_NAME || process.env.DEFAULT_PARISH_NAME || "St Thomas Cathedral",
   tenantId: "demo-tenant",
   parishId: "st-thomas-cathedral",
   choirId: "cathedral-choir",
@@ -357,6 +365,28 @@ function normalizeReadingLanguage(value: unknown): BibleLanguage {
 
 function getReadingDocId(date: string, language: BibleLanguage) {
   return language === "ta" ? date : `${date}_${language}`;
+}
+
+function createPendingDailyReading(date: string, language: BibleLanguage, syncMessage: string): DailyReadingRecord {
+  const now = new Date().toISOString();
+  return {
+    id: getReadingDocId(date, language),
+    date,
+    language,
+    title: language === "ta" ? "திருப்பலி வாசகங்கள்" : "Mass Readings",
+    liturgicalDay: "Readings are not stored for this date yet.",
+    sourceUrl: ARULVAKKU_CALENDAR_URL,
+    publicDisplay: true,
+    lastSyncedAt: now,
+    syncStatus: "pending",
+    syncMessage,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: "system",
+    updatedBy: "system",
+    status: "active",
+    ...DEFAULT_TENANT_CONTEXT,
+  };
 }
 
 function stripCatholicHtmlToText(html: string) {
@@ -464,12 +494,15 @@ async function fetchArulvakkuReading(date: string, language: BibleLanguage, publ
     throw new Error("English daily readings are prepared for future source integration.");
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   const response = await fetch(ARULVAKKU_CALENDAR_URL, {
+    signal: controller.signal,
     headers: {
       "User-Agent": "Choir360/1.0 (+daily-readings-sync)",
       "Accept": "text/html,application/xhtml+xml",
     },
-  });
+  }).finally(() => clearTimeout(timeout));
 
   if (!response.ok) {
     throw new Error(`Arulvakku source returned HTTP ${response.status}.`);
@@ -549,6 +582,8 @@ interface CatholicHubContentRecord {
   updatedAt: string;
   createdBy: string;
   updatedBy: string;
+  archdioceseId: string;
+  parishName: string;
   tenantId: string;
   parishId: string;
   choirId: string;
@@ -605,6 +640,8 @@ const CATHOLIC_HUB_SONG_CATEGORIES = [
 ] as const;
 
 type CatholicHubSongCategoryId = typeof CATHOLIC_HUB_SONG_CATEGORIES[number]["categoryId"];
+const SONG_SYNC_INTERVAL_DAYS = 90;
+const SONG_SYNC_INTERVAL_MS = SONG_SYNC_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
 
 interface CatholicHubSongRecord {
   id: string;
@@ -634,6 +671,8 @@ interface CatholicHubSongRecord {
   updatedAt: string;
   createdBy: string;
   updatedBy: string;
+  archdioceseId: string;
+  parishName: string;
   tenantId: string;
   parishId: string;
   choirId: string;
@@ -946,6 +985,51 @@ function resolveCatholicHubSongCategories(categoryId?: unknown) {
   return [category];
 }
 
+async function countActiveCatholicHubSongs(categoryId: string) {
+  if (!admin.apps.length) return 0;
+  const snapshot = await admin.firestore()
+    .collection("catholicHubSongs")
+    .where("status", "==", "active")
+    .where("category", "==", categoryId)
+    .limit(1)
+    .get();
+  return snapshot.size;
+}
+
+async function shouldSyncCatholicHubSongCategory(categoryId: string) {
+  if (!admin.apps.length) {
+    return { shouldSync: false, reason: "Firebase Admin is not configured.", activeSongCount: 0 };
+  }
+
+  const statusSnap = await admin.firestore().collection("catholicHubSongSyncStatus").doc(categoryId).get();
+  const status = statusSnap.exists ? statusSnap.data() as CatholicHubSongSyncStatusRecord : null;
+  const activeSongCount = await countActiveCatholicHubSongs(categoryId);
+
+  if (status?.status === "syncing" && status.lastSyncedAt) {
+    const syncAge = Date.now() - new Date(status.lastSyncedAt).getTime();
+    if (syncAge < 10 * 60 * 1000) {
+      return { shouldSync: false, reason: "Sync already running.", activeSongCount };
+    }
+  }
+
+  if (activeSongCount === 0) {
+    return { shouldSync: true, reason: "Category has no cached songs.", activeSongCount };
+  }
+
+  const lastSuccess = status?.lastSuccessAt;
+  if (!lastSuccess) {
+    return { shouldSync: true, reason: "Category has no successful sync timestamp.", activeSongCount };
+  }
+
+  const age = Date.now() - new Date(lastSuccess).getTime();
+  if (age >= SONG_SYNC_INTERVAL_MS) {
+    return { shouldSync: true, reason: `Category sync is older than ${SONG_SYNC_INTERVAL_DAYS} days.`, activeSongCount };
+  }
+
+  const daysAgo = Math.floor(age / (24 * 60 * 60 * 1000));
+  return { shouldSync: false, reason: `Category synced ${daysAgo} days ago.`, activeSongCount };
+}
+
 async function syncCatholicHubSongs(categoryId?: CatholicHubSongCategoryId | "all", userId = "system-sync") {
   if (!admin.apps.length) {
     throw new Error("Firebase Admin is not configured — cannot persist Catholic Hub songs.");
@@ -955,13 +1039,7 @@ async function syncCatholicHubSongs(categoryId?: CatholicHubSongCategoryId | "al
   const firestore = admin.firestore();
   const now = new Date().toISOString();
 
-  // Next scheduled sync = first day of next month at 04:00 IST
-  const nextSync = (() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + 1, 1);
-    d.setHours(4, 0, 0, 0);
-    return d.toISOString();
-  })();
+  const nextSync = new Date(Date.now() + SONG_SYNC_INTERVAL_MS).toISOString();
 
   const synced: Array<{
     categoryId: string;
@@ -1267,21 +1345,25 @@ app.get("/api/bible/daily-readings", async (req, res) => {
   const date = normalizeReadingDate(req.query.date);
   const language = normalizeReadingLanguage(req.query.language);
   const refresh = req.query.refresh === "1" || req.query.refresh === "true";
-  const isToday = date === getDateInIndia();
+  const today = getDateInIndia();
+  const isPastDate = date < today;
 
   try {
     const cached = await readStoredDailyReading(date, language);
-    if (cached && (!refresh || !isToday)) {
+    if (cached && (!refresh || isPastDate)) {
       if (cached.publicDisplay === false) {
         return res.status(404).json({ error: "Daily readings are not publicly displayed for this date." });
       }
       return res.json({ reading: { ...cached, syncStatus: "cached" } });
     }
 
-    if (!isToday) {
-      return res.status(404).json({
-        error: "No stored readings are available for this date yet.",
-        sourceUrl: ARULVAKKU_CALENDAR_URL,
+    if (isPastDate) {
+      return res.json({
+        reading: createPendingDailyReading(
+          date,
+          language,
+          "No stored readings are available for this date yet."
+        ),
       });
     }
 
@@ -1303,9 +1385,12 @@ app.get("/api/bible/daily-readings", async (req, res) => {
       });
     }
 
-    return res.status(502).json({
-      error: error.message || "Daily readings could not be synced.",
-      sourceUrl: ARULVAKKU_CALENDAR_URL,
+    return res.json({
+      reading: createPendingDailyReading(
+        date,
+        language,
+        `Readings are not available for this date yet. ${error.message ? `Latest sync attempt: ${error.message}` : ""}`.trim()
+      ),
     });
   }
 });
@@ -1400,6 +1485,43 @@ app.post("/api/catholic-hub/songs/sync", requireFirebaseAuth, requireAdminRole, 
   } catch (error: any) {
     return res.status(502).json({
       error: error?.message || "Catholic Hub songs sync failed.",
+    });
+  }
+});
+
+app.post("/api/catholic-hub/songs/ensure", async (req, res) => {
+  const requestedCategory = typeof req.body?.categoryId === "string" ? req.body.categoryId : "";
+  try {
+    if (!requestedCategory || requestedCategory === "all") {
+      return res.status(400).json({ error: "Select a song category to sync." });
+    }
+
+    const [category] = resolveCatholicHubSongCategories(requestedCategory);
+    const decision = await shouldSyncCatholicHubSongCategory(category.categoryId);
+
+    if (!decision.shouldSync) {
+      return res.json({
+        ok: true,
+        skipped: true,
+        categoryId: category.categoryId,
+        message: decision.reason,
+        activeSongCount: decision.activeSongCount,
+      });
+    }
+
+    const result = await syncCatholicHubSongs(category.categoryId, "public-category-sync");
+    return res.json({
+      ok: true,
+      skipped: false,
+      categoryId: category.categoryId,
+      message: "Catholic Hub song category synced.",
+      reason: decision.reason,
+      totalSongsSynced: result.totalSongsSynced,
+      categories: result.categories,
+    });
+  } catch (error: any) {
+    return res.status(502).json({
+      error: error?.message || "Catholic Hub song category sync failed.",
     });
   }
 });
@@ -1875,37 +1997,36 @@ function startReadingsSchedule() {
  * Catholic Hub content (catholictamil.com Atom feed) — synced once per day at
  * IST 03:00 (off-peak). Also runs once at startup (non-blocking).
  *
- * Songs from radio.catholictamil.com — synced ONCE PER MONTH.
+ * Songs from radio.catholictamil.com — synced once every 3 months.
  * After a successful full sync the timestamp is stored in Firestore
- * (contentSyncStatus/songs-monthly). On each daily check we read that
- * document; if it is less than 30 days old we skip. This means:
- *   • Songs are never re-scraped more than once a month
+ * (contentSyncStatus/songs-quarterly). On each daily check we read that
+ * document; if it is less than 90 days old we skip. This means:
+ *   • Songs are never re-scraped more than once every 3 months
  *   • The stored data persists indefinitely — no data loss between deploys
  *   • A manual "Sync all" from the admin UI bypasses the gate
  */
-async function runMonthlySongSyncIfNeeded(userId = "system-monthly") {
+async function runQuarterlySongSyncIfNeeded(userId = "system-quarterly") {
   if (!admin.apps.length) return;
   const db = admin.firestore();
-  const statusRef = db.collection("contentSyncStatus").doc("songs-monthly");
+  const statusRef = db.collection("contentSyncStatus").doc("songs-quarterly");
   try {
     const snap = await statusRef.get();
     if (snap.exists) {
       const lastSuccess: string | undefined = snap.data()?.lastSuccessAt;
       if (lastSuccess) {
         const age = Date.now() - new Date(lastSuccess).getTime();
-        const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
-        if (age < THIRTY_DAYS) {
+        if (age < SONG_SYNC_INTERVAL_MS) {
           const daysAgo = Math.floor(age / (24 * 60 * 60 * 1000));
-          console.log(`[Songs Monthly] last sync was ${daysAgo}d ago — skipping (next in ${30 - daysAgo}d).`);
+          console.log(`[Songs Quarterly] last sync was ${daysAgo}d ago — skipping (next in ${SONG_SYNC_INTERVAL_DAYS - daysAgo}d).`);
           return;
         }
       }
     }
   } catch (e: any) {
-    console.warn("[Songs Monthly] could not read sync status:", e?.message);
+    console.warn("[Songs Quarterly] could not read sync status:", e?.message);
   }
 
-  console.log("[Songs Monthly] starting full song sync for all 35 categories...");
+  console.log("[Songs Quarterly] starting full song sync for all 35 categories...");
   try {
     const result = await syncCatholicHubSongs("all", userId);
     const totalSynced = result.totalSongsSynced;
@@ -1913,9 +2034,9 @@ async function runMonthlySongSyncIfNeeded(userId = "system-monthly") {
       { lastSuccessAt: new Date().toISOString(), totalSongsSynced: totalSynced, syncedBy: userId },
       { merge: true }
     );
-    console.log(`[Songs Monthly] sync complete — ${totalSynced} songs across ${result.categories.length} categories.`);
+    console.log(`[Songs Quarterly] sync complete — ${totalSynced} songs across ${result.categories.length} categories.`);
   } catch (e: any) {
-    console.warn("[Songs Monthly] sync failed:", e?.message);
+    console.warn("[Songs Quarterly] sync failed:", e?.message);
   }
 }
 
@@ -1929,9 +2050,9 @@ function startCatholicHubSchedule() {
     );
   });
 
-  // Monthly song sync check — runs daily at IST 04:00 but skips if < 30 days since last success
-  scheduleDailyAt(4, "songs-monthly-check-0400", () => {
-    void runMonthlySongSyncIfNeeded("system-monthly");
+  // Quarterly song sync check — runs daily at IST 04:00 but skips if < 90 days since last success
+  scheduleDailyAt(4, "songs-quarterly-check-0400", () => {
+    void runQuarterlySongSyncIfNeeded("system-quarterly");
   });
 }
 

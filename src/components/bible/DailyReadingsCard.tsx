@@ -330,8 +330,10 @@ export const DailyReadingsCard: React.FC = () => {
               ) : (
                 <div className="rounded-xl border border-slate-200 bg-white p-8 text-center">
                   <BookOpen className="mx-auto h-10 w-10 text-slate-400" />
-                  <h3 className="mt-4 text-lg font-bold text-slate-900">No readings found for this date</h3>
-                  <p className="mt-1 text-sm text-slate-500">Try refreshing from the source or select another date.</p>
+                  <h3 className="mt-4 text-lg font-bold text-slate-900">Readings are not stored for this date yet</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {reading?.syncMessage || 'Choose Today for the latest synced readings, or select another stored date.'}
+                  </p>
                 </div>
               )}
             </div>
